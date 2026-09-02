@@ -53,6 +53,7 @@ class Device(StrEnum):
     CUDA = "cuda"
     CPU = "cpu"
     META = "meta"
+    NPU = "npu"
 
 
 DEVICE: Final[Device] = Device(os.environ.get("COSMOS_DEVICE", "cuda").lower())
@@ -60,6 +61,34 @@ DEVICE: Final[Device] = Device(os.environ.get("COSMOS_DEVICE", "cuda").lower())
 
 Used for checkpoint conversion and smoke tests.
 """
+
+# ponytail: auto-patch torch.cuda.* → torch_npu.npu.* on NPU. Covers most
+# .cuda() / torch.cuda.Stream / Event / synchronize / etc. transparently.
+# Semantic hazards (CUDAGraph, NVFP4, flash2/3/cuDNN/NATTEN) are gated
+# separately in their respective modules.
+if DEVICE == Device.NPU:
+    try:
+        import torch_npu
+
+        torch_npu.npu.set_device(torch_npu.npu.current_device())
+    except ImportError:
+        pass  # torch_npu not installed; all NPU-specific paths will fail gracefully
+
+# NPU torch.compile backend (torchair).  None on CUDA; on NPU this is the
+# backend object returned by torchair.get_npu_backend() which is passed to
+# torch.compile(backend=...).  callers check `is not None` to decide whether
+# to use fullgraph=True / mode="reduce-overhead" (CUDA) or the torchair
+# backend (NPU).
+NPU_COMPILE_BACKEND: object | None = None
+if DEVICE == Device.NPU:
+    try:
+        import torchair  # noqa: F811 — must follow torch_npu import above
+        from torchair import patch_for_hcom
+
+        patch_for_hcom()
+        NPU_COMPILE_BACKEND = torchair.get_npu_backend()
+    except ImportError:
+        pass  # torchair not installed; torch.compile will use default inductor
 
 VERBOSE: Final[bool] = _get_bool("COSMOS_VERBOSE", INTERNAL)
 """Whether to enable verbose console output."""

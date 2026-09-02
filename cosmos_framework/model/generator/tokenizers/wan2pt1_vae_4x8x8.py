@@ -706,7 +706,7 @@ class WanVAE:
             self.model = self.model.to(dtype=dtype)
             self.context = nullcontext()
         else:
-            self.context = torch.amp.autocast("cuda", dtype=dtype)
+            self.context = torch.amp.autocast(device if isinstance(device, str) else device.type, dtype=dtype)
 
         if use_channels_last_memory_format:
             for _, module in self.model.encoder.named_modules():

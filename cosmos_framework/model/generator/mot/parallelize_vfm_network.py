@@ -19,20 +19,30 @@ def apply_compile(model: torch.nn.Module, config: CompileConfig):
     trace them as a single dynamic graph (``fullgraph=True, dynamic=True``).
     This keeps AR inference (which sets ``compile_dynamic=False`` on MoT for
     shape-specialized kernels) from accidentally regressing the VFM compile.
+
+    On NPU, uses the ``torchair`` backend instead of the default inductor, and
+    drops ``fullgraph=True`` / ``mode="reduce-overhead"`` which are not
+    supported by ``torchair``.
     """
 
-    inductor_options = {}
-    if config.max_autotune_pointwise:
-        inductor_options["max_autotune_pointwise"] = True
-    if config.coordinate_descent_tuning:
-        inductor_options["coordinate_descent_tuning"] = True
+    from cosmos_framework.utils.flags import NPU_COMPILE_BACKEND
 
-    compile_options = {
-        "fullgraph": True,
-        "dynamic": True,
-        "mode": "reduce-overhead" if config.use_cuda_graphs else None,
-        "options": inductor_options or None,
-    }
+    if NPU_COMPILE_BACKEND is not None:
+        # NPU: torchair backend, no fullgraph constraint, no CUDA graph mode.
+        compile_options = {"backend": NPU_COMPILE_BACKEND, "dynamic": True}
+    else:
+        inductor_options = {}
+        if config.max_autotune_pointwise:
+            inductor_options["max_autotune_pointwise"] = True
+        if config.coordinate_descent_tuning:
+            inductor_options["coordinate_descent_tuning"] = True
+
+        compile_options = {
+            "fullgraph": True,
+            "dynamic": True,
+            "mode": "reduce-overhead" if config.use_cuda_graphs else None,
+            "options": inductor_options or None,
+        }
 
     model._encode_text = torch.compile(model._encode_text, **compile_options)
     model._encode_vision = torch.compile(model._encode_vision, **compile_options)

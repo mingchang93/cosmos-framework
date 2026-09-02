@@ -164,21 +164,30 @@ def apply_compile(model: nn.Module, config: CompileConfig) -> None:
     """
     Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
     repeated structure. Alternatively one can compile the whole model (after applying DP).
+
+    On NPU, uses the ``torchair`` backend and drops ``fullgraph=True`` /
+    ``mode="reduce-overhead"`` which are not supported by ``torchair``.
     """
-    compile_options = {}
-    if config.max_autotune_pointwise:
-        compile_options["max_autotune_pointwise"] = True
-    if config.coordinate_descent_tuning:
-        compile_options["coordinate_descent_tuning"] = True
+    from cosmos_framework.utils.flags import NPU_COMPILE_BACKEND
+
+    if NPU_COMPILE_BACKEND is not None:
+        compile_kwargs = {"backend": NPU_COMPILE_BACKEND, "dynamic": config.compile_dynamic}
+    else:
+        compile_options = {}
+        if config.max_autotune_pointwise:
+            compile_options["max_autotune_pointwise"] = True
+        if config.coordinate_descent_tuning:
+            compile_options["coordinate_descent_tuning"] = True
+
+        compile_kwargs = {
+            "fullgraph": True,
+            "dynamic": config.compile_dynamic,
+            "mode": "reduce-overhead" if config.use_cuda_graphs else None,
+            "options": compile_options or None,
+        }
 
     for layer_id, block in model.model.layers.named_children():
-        block = torch.compile(
-            block,
-            fullgraph=True,
-            dynamic=config.compile_dynamic,
-            mode="reduce-overhead" if config.use_cuda_graphs else None,
-            options=compile_options or None,
-        )
+        block = torch.compile(block, **compile_kwargs)
         model.model.layers.register_module(layer_id, block)
 
 

@@ -21,6 +21,8 @@ def get_arch_tag(device: torch.device | None = None) -> int:
     """
     Returns the compute capability of a given torch device if it's a CUDA device, otherwise returns 0.
 
+    For NPU devices, returns 1 so ``get_backend_list`` can dispatch the NPU backend.
+
     Args:
         device (torch.device | None): torch device. Uses default device if None.
 
@@ -30,6 +32,16 @@ def get_arch_tag(device: torch.device | None = None) -> int:
     if torch.cuda.is_available() and torch.version.cuda and (device is None or device.type == "cuda"):
         major, minor = torch.cuda.get_device_capability(device)
         return major * 10 + minor
+    if device is not None and device.type == "npu":
+        return 1  # NPU arch tag — dispatched by get_backend_list
+    if device is None:
+        try:
+            import torch_npu
+
+            if torch_npu.npu.is_available():
+                return 1
+        except ImportError:
+            pass
     return 0
 
 
@@ -68,6 +80,18 @@ def is_blackwell(device: torch.device | None = None) -> bool:
     return get_arch_tag(device) in [100, 103, 110, 120, 121]
 
 
+def is_npu(device: torch.device | None = None) -> bool:
+    """True when the device is an NPU (e.g. Huawei Ascend)."""
+    if device is not None:
+        return device.type == "npu"
+    try:
+        import torch_npu
+
+        return torch_npu.npu.is_available()
+    except ImportError:
+        return False
+
+
 __all__ = [
     "get_arch_tag",
     "log_or_raise_error",
@@ -77,6 +101,7 @@ __all__ = [
     "is_hopper",
     "is_blackwell_dc",
     "is_blackwell",
+    "is_npu",
     "is_torch_compiling",
     "torch_deterministic_mode",
 ]

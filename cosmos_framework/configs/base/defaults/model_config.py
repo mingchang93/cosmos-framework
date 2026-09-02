@@ -210,6 +210,12 @@ class OmniMoTModelConfig:
     # "float16", "float32".
     precision: str = "bfloat16"
 
+    # Device type: "cuda", "npu", "cpu", or "meta". Consumed by
+    # ``OmniMoTModel.set_precision`` for ``tensor_kwargs["device"]``,
+    # ``build_net`` for ``to_empty(device=...)``, and
+    # ``set_up_parallelism`` for ``build_meshes(device_type=...)``.
+    device_type: str = "cuda"
+
     # LoRA (parameter-efficient fine-tuning). When `lora_enabled=True`,
     # `OmniMoTModel.build_net` injects custom LoRA adapters BEFORE FSDP wrap on
     # the meta-device network, then re-initializes lora_A/lora_B after

@@ -18,7 +18,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Callable, Container, Optional
 
-import pynvml
+try:
+    import pynvml
+except ImportError:
+    pynvml = None  # ponytail: pynvml is NVIDIA-only; NPU has no equivalent
+
 import torch
 import torch.distributed as dist
 from torch.distributed import get_process_group_ranks
@@ -36,6 +40,33 @@ if TYPE_CHECKING:
     from cosmos_framework.utils.config import DDPConfig
 
 
+def _current_device() -> int:
+    """Return the current device index, CUDA or NPU."""
+    _device = os.environ.get("COSMOS_DEVICE", "cuda").lower()
+    if _device == "npu":
+        try:
+            import torch_npu
+
+            return torch_npu.npu.current_device()
+        except ImportError:
+            return 0
+    return torch.cuda.current_device()
+
+
+def _set_device(local_rank: int) -> None:
+    """Set the current device, CUDA or NPU."""
+    _device = os.environ.get("COSMOS_DEVICE", "cuda").lower()
+    if _device == "npu":
+        try:
+            import torch_npu
+
+            torch_npu.npu.set_device(local_rank)
+        except ImportError:
+            pass
+    else:
+        torch.cuda.set_device(local_rank)
+
+
 def init(store: dist.Store | None = None, backend: str | None = None) -> int | None:
     """Initialize distributed training.
 
@@ -45,43 +76,52 @@ def init(store: dist.Store | None = None, backend: str | None = None) -> int | N
             whose store adopts a socket its parent reserved (see
             :mod:`cosmos_framework.checkpoint.background_store`). ``RANK`` and ``WORLD_SIZE`` must be
             set, as they are for env:// rendezvous.
-        backend: Optional backend override. Defaults to nccl on CUDA. The background checkpoint
-            process passes "gloo": it coordinates over CPU-resident state dicts, which NCCL cannot
-            synchronize, and a second NCCL group per rank would consume GPU memory alongside the
-            training group's communicators.
+        backend: Optional backend override. Defaults to nccl on CUDA, hccl on NPU. The background
+            checkpoint process passes "gloo": it coordinates over CPU-resident state dicts, which
+            NCCL/HCCL cannot synchronize, and a second collective group per rank would consume
+            device memory alongside the training group's communicators.
     """
     if dist.is_initialized():
-        return torch.cuda.current_device()
+        return _current_device()
 
-    # Set GPU affinity.
-    pynvml.nvmlInit()
-    local_rank = int(os.getenv("LOCAL_RANK", 0))
-    try:
-        device = Device(local_rank)
-        os.sched_setaffinity(0, device.get_cpu_affinity())
-    except pynvml.NVMLError as e:
-        log.warning(f"Failed to set device affinity: {e}")
+    # Set device affinity (CUDA only; pynvml is NVIDIA-specific).
+    if pynvml is not None:
+        pynvml.nvmlInit()
+        local_rank = int(os.getenv("LOCAL_RANK", 0))
+        try:
+            device = Device(local_rank)
+            os.sched_setaffinity(0, device.get_cpu_affinity())
+        except pynvml.NVMLError as e:
+            log.warning(f"Failed to set device affinity: {e}")
+    else:
+        local_rank = int(os.getenv("LOCAL_RANK", 0))
     # Set up distributed communication. CPU checkpoint conversion needs Gloo
-    # because NCCL cannot synchronize CPU-resident tokenizer or model tensors.
+    # because NCCL/HCCL cannot synchronize CPU-resident tokenizer or model tensors.
     os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "0"
     os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
     if dist.is_available():
-        torch.cuda.set_device(local_rank)
+        _set_device(local_rank)
         # Get the timeout value from environment variable
         timeout_seconds = os.getenv("TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC", 1800)
         # Convert the timeout to an integer (if it isn't already) and then to a timedelta
         timeout_timedelta = timedelta(seconds=int(timeout_seconds))
         subgroup_timeout_seconds = os.environ.get("COSMOS_NCCL_SUBGROUP_TIMEOUT_SEC")
         if subgroup_timeout_seconds is not None:
-            # DeviceMesh creates NCCL subgroups without an explicit timeout, so
-            # PyTorch otherwise uses its shorter 10-minute NCCL default.
+            # DeviceMesh creates NCCL/HCCL subgroups without an explicit timeout, so
+            # PyTorch otherwise uses its shorter 10-minute default.
             dist.distributed_c10d.default_pg_nccl_timeout = timedelta(seconds=int(subgroup_timeout_seconds))
             log.info(
-                f"Set default NCCL subgroup timeout to {subgroup_timeout_seconds} seconds",
+                f"Set default NCCL/HCCL subgroup timeout to {subgroup_timeout_seconds} seconds",
                 rank0_only=False,
             )
         if backend is None:
-            backend = "nccl" if os.environ.get("COSMOS_DEVICE", "cuda").lower() == "cuda" else "gloo"
+            _device = os.environ.get("COSMOS_DEVICE", "cuda").lower()
+            if _device == "npu":
+                backend = "hccl"
+            elif _device == "cuda":
+                backend = "nccl"
+            else:
+                backend = "gloo"
         if store is not None:
             dist.init_process_group(
                 backend=backend,
@@ -146,7 +186,7 @@ def is_local_rank0() -> bool:
     Returns:
         (bool): True if this function is called from the local master GPU, else False.
     """
-    return torch.cuda.current_device() == 0
+    return _current_device() == 0
 
 
 def rank0_only(func: Callable) -> Callable:
@@ -888,8 +928,9 @@ def broadcast_object_list_optimized(
     skeleton = skeleton_box[0]
 
     backend = dist.get_backend(group)
-    if backend == dist.Backend.NCCL:
-        collective_device = device or torch.device("cuda", torch.cuda.current_device())
+    if backend in (dist.Backend.NCCL, "hccl"):
+        device_type = "npu" if backend == "hccl" else "cuda"
+        collective_device = device or torch.device(device_type, _current_device())
     else:
         collective_device = torch.device("cpu")
     rebuilt_tensors: list[torch.Tensor] = []

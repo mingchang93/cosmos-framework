@@ -11,6 +11,20 @@ from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 
 from cosmos_framework.utils import log
+
+
+def _resolve_device() -> torch.device:
+    """Return the current device, CUDA or NPU."""
+    if torch.cuda.is_available():
+        return torch.device("cuda", torch.cuda.current_device())
+    try:
+        import torch_npu
+
+        if torch_npu.npu.is_available():
+            return torch.device("npu", torch_npu.npu.current_device())
+    except ImportError:
+        pass
+    return torch.device("cpu")
 from cosmos_framework.configs.base.defaults.flex_attention import (
     AttentionScope,
     FlexBackendPreference,
@@ -189,9 +203,7 @@ class Cosmos3VFMNetwork(PreTrainedModel):
             # The device is only read for the GPU architecture the FlashAttention-4 block size
             # follows from, which is the same for every device in this process, so the local one
             # stands in for the one the batch will arrive on.
-            device = (
-                torch.device("cuda", torch.cuda.current_device()) if torch.cuda.is_available() else torch.device("cpu")
-            )
+            device = _resolve_device()
             self.flex_backend = resolve_flex_backend(device, config.flex_attention_backend)
             temporal_window = config.decomposed_temporal_window_seconds
             temporal_window_note = (
@@ -677,13 +689,14 @@ class Cosmos3VFMNetwork(PreTrainedModel):
         """Embed noised-token timesteps, reusing work when packing proves they share one scalar."""
         if packed_seq.uses_single_timestep and timesteps.numel() > 1:
             timestep = timesteps[:1]  # [1]
-            with torch.autocast("cuda", enabled=True, dtype=torch.float32):
+            with torch.autocast(timesteps.device.type, enabled=True, dtype=torch.float32):
                 timestep_embed = self.time_embedder(timestep)  # [1,hidden_size]
             # Materialize: expand() aliases storage; in-place ops on a float32 no-op .to() would corrupt all rows.
             return timestep_embed.expand(timesteps.shape[0], -1).contiguous()  # [N_noisy_frames,hidden_size]
 
         # Timesteps are computed in FP32 for numerical stability.
-        with torch.autocast("cuda", enabled=True, dtype=torch.float32):
+        device_type = timesteps.device.type if timesteps.device.type in ("cuda", "npu") else "cuda"
+        with torch.autocast(device_type, enabled=True, dtype=torch.float32):
             return self.time_embedder(timesteps)  # [N_noisy_frames,hidden_size]
 
     def _encode_vision(

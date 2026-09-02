@@ -122,7 +122,13 @@ def _copy_static_inputs_(destination: Any, source: Any) -> None:
 
 
 class _CoarseCUDAGraphRunner:
-    """Own one captured full-model graph and its stable input/output storage."""
+    """Own one captured full-model graph and its stable input/output storage.
+
+    ponytail: CUDA Graphs have no NPU equivalent. When device is not CUDA, the
+    entire graph capture/replay path is skipped — the model runs the native
+    forward path instead. Add NPU graph capture when a torch_npu equivalent
+    becomes available.
+    """
 
     def __init__(
         self,
@@ -134,6 +140,8 @@ class _CoarseCUDAGraphRunner:
         capture_stream: torch.cuda.Stream,
         graph_pool: Any,
     ) -> None:
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA Graph capture requires a CUDA device.")
         self.graph_name: str = graph_name
         self.cache_identity: tuple[int, ...] = _dual_kv_cache_identity(memory_info)
         self.static_pack: PackedSequence = copy.deepcopy(packed_seq)
@@ -207,7 +215,14 @@ class ARPostSaturationCUDAGraphManager:
         packed_seq: PackedSequence,
         memory_info: dict[str, Any],
     ) -> dict[str, Any]:
-        """Capture on first use, then replay a branch-specific coarse graph."""
+        """Capture on first use, then replay a branch-specific coarse graph.
+
+        ponytail: on non-CUDA devices (NPU), CUDA Graph capture is not
+        available. Fall through to the native forward path instead.
+        """
+        if not torch.cuda.is_available():
+            return model.denoise(data_batch_packed=packed_seq, memory=model.build_memory_state(packed_seq, memory_info))
+
         if kind not in {"denoise", "refresh"}:
             raise ValueError(f"Unsupported post-saturation CUDA Graph kind={kind!r}")
         key = (kind, branch)

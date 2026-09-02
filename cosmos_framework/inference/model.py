@@ -344,7 +344,7 @@ class _MmapSafeReadMixin:
         if target_tensor.size() != tensor.size():
             raise AssertionError(f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}")
 
-        if target_tensor.is_cuda and self._materialize_enabled():
+        if (target_tensor.is_cuda or target_tensor.device.type == "npu") and self._materialize_enabled():
             # Materialise into anonymous host memory before the H2D copy.
             #
             # The base implementation copies straight from mmap-backed safetensors

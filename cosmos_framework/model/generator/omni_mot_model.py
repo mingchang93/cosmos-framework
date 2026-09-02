@@ -20,7 +20,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.nn.modules.module import _IncompatibleKeys
 
-from cosmos_framework.utils.flags import DEVICE, Device
+from cosmos_framework.utils.flags import DEVICE
 from cosmos_framework.utils.lazy_config import LazyDict
 from cosmos_framework.utils.lazy_config import instantiate as lazy_instantiate
 from cosmos_framework.utils.lazy_config.registry import locate
@@ -178,12 +178,14 @@ class OmniMoTModel(ImaginaireModel):
 
     def set_precision(self) -> None:
         self.precision = PRECISION_TO_TORCH_DTYPE[self.config.precision]
-        self.tensor_kwargs = {"device": DEVICE, "dtype": self.precision}
-        self.tensor_kwargs_fp32 = {"device": DEVICE, "dtype": torch.float32}
+        self.device_type = getattr(self.config, "device_type", "cuda")
+        self.tensor_kwargs = {"device": self.device_type, "dtype": self.precision}
+        self.tensor_kwargs_fp32 = {"device": self.device_type, "dtype": torch.float32}
         log.warning(f"OmniMoTModel: precision {self.precision}")
 
         # Disable TF32 for CUDA matrix multiplications since this may impact model quality.
-        torch.backends.cudnn.allow_tf32 = torch.backends.cuda.matmul.allow_tf32 = False
+        if self.device_type == "cuda":
+            torch.backends.cudnn.allow_tf32 = torch.backends.cuda.matmul.allow_tf32 = False
 
     def set_up_data_key(self) -> None:
         self.input_video_key = self.config.input_video_key  # by default it is video key for Video diffusion model
@@ -414,12 +416,12 @@ class OmniMoTModel(ImaginaireModel):
         )
 
         with misc.timer("meta to cuda and broadcast model states"):
-            net.to_empty(device=DEVICE)
-            if DEVICE == Device.CUDA:
+            net.to_empty(device=self.device_type)
+            if self.device_type == "cuda":
                 # Weight initialization is not needed for other devices (cpu,
                 # meta), since they are only for checkpoint conversion and smoke
                 # tests.
-                net.init_weights(buffer_device=DEVICE)
+                net.init_weights(buffer_device=self.device_type)
                 if lora_enabled:
                     self._init_lora_weights_post_materialization(net)
 
@@ -549,7 +551,8 @@ class OmniMoTModel(ImaginaireModel):
 
         self.set_up_memory()
 
-        torch.cuda.empty_cache()
+        if self.device_type == "cuda":
+            torch.cuda.empty_cache()
 
     def install_attention_dispatch(self, net: torch.nn.Module) -> None:
         """Install a custom attention dispatch function on the network.
@@ -579,7 +582,7 @@ class OmniMoTModel(ImaginaireModel):
             cp=self.config.parallelism.context_parallel_shard_degree,
             lb=self.config.parallelism.vae_load_balance_group_size,
         )
-        self.parallel_dims.build_meshes(device_type=DEVICE)
+        self.parallel_dims.build_meshes(device_type=self.device_type)
 
     def set_up_scheduler_and_sampler(self):
         # Get shift values - support both int and dict-based resolution lookup.
@@ -617,7 +620,7 @@ class OmniMoTModel(ImaginaireModel):
                 use_dynamic_shift=rf_config.use_dynamic_shift,
                 shift=shift_image,
                 train_time_weight_method=rf_config.train_time_weight,
-                device=torch.device(DEVICE),
+                device=torch.device(self.device_type),
                 dtype=self.tensor_kwargs_fp32["dtype"],
             )
             self.rectified_flow_video = RectifiedFlow(
@@ -626,7 +629,7 @@ class OmniMoTModel(ImaginaireModel):
                 use_dynamic_shift=rf_config.use_dynamic_shift,
                 shift=shift_video,
                 train_time_weight_method=rf_config.train_time_weight,
-                device=torch.device(DEVICE),
+                device=torch.device(self.device_type),
                 dtype=self.tensor_kwargs_fp32["dtype"],
             )
         if self.config.action_gen:
@@ -636,7 +639,7 @@ class OmniMoTModel(ImaginaireModel):
                 use_dynamic_shift=self.config.rectified_flow_training_config.use_dynamic_shift,
                 shift=shift_video,
                 train_time_weight_method=self.config.rectified_flow_training_config.train_time_weight,
-                device=torch.device(DEVICE),
+                device=torch.device(self.device_type),
                 dtype=self.tensor_kwargs_fp32["dtype"],
             )
         if self.config.sound_gen:
@@ -646,7 +649,7 @@ class OmniMoTModel(ImaginaireModel):
                 use_dynamic_shift=self.config.rectified_flow_training_config.use_dynamic_shift,
                 shift=shift_video,
                 train_time_weight_method=self.config.rectified_flow_training_config.train_time_weight,
-                device=torch.device(DEVICE),
+                device=torch.device(self.device_type),
                 dtype=self.tensor_kwargs_fp32["dtype"],
             )
 

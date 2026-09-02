@@ -384,6 +384,15 @@ def _unmasked_group_scaled_dot_product_attention(
                 dropout_p=0.0,
                 is_causal=False,
             )  # [1,H,Tq,Dv]
+    elif q.device.type == "npu":
+        # torch_npu routes SDPA to CANN's Flash Attention 2 automatically.
+        output_heads_first = F.scaled_dot_product_attention(
+            q_heads_first,
+            k_heads_first,
+            v_heads_first,
+            dropout_p=0.0,
+            is_causal=False,
+        )  # [1,H,Tq,Dv]
     else:
         output_heads_first = F.scaled_dot_product_attention(
             q_heads_first,

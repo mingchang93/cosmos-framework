@@ -21,7 +21,7 @@ def _assert_tensor_condition(condition: torch.Tensor, *, message: str) -> None: 
     """Validate one device scalar without synchronizing the CUDA host thread."""
     if condition.numel() != 1:
         raise ValueError(f"Tensor condition must contain one element, got shape {tuple(condition.shape)}.")
-    if condition.is_cuda:
+    if condition.is_cuda or condition.device.type == "npu":
         torch._assert_async(condition, message)
     elif not bool(condition.item()):
         raise ValueError(message)

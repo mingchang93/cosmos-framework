@@ -317,6 +317,14 @@ class ModelConfig(BaseModel):
             "lands at ``model.config.precision`` now."
         ),
     )
+    device_type: str = Field(
+        default="cuda",
+        description=(
+            "Device type for the network: 'cuda', 'npu', 'cpu', or 'meta'. "
+            "Lands at ``model.config.device_type``. Overrides the "
+            "``COSMOS_DEVICE`` env var. Set to 'npu' for Huawei Ascend NPU."
+        ),
+    )
     max_num_tokens_after_packing: int = Field(
         default=13312,
         description=(
