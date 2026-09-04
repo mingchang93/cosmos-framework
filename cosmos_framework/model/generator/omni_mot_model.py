@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
+import os
 import torch.distributed as dist
 from einops import rearrange
 from torch.distributed._composable.fsdp import FSDPModule
@@ -178,7 +179,7 @@ class OmniMoTModel(ImaginaireModel):
 
     def set_precision(self) -> None:
         self.precision = PRECISION_TO_TORCH_DTYPE[self.config.precision]
-        self.device_type = getattr(self.config, "device_type", "cuda")
+        self.device_type = os.environ.get("COSMOS_DEVICE", getattr(self.config, "device_type", "cuda"))
         self.tensor_kwargs = {"device": self.device_type, "dtype": self.precision}
         self.tensor_kwargs_fp32 = {"device": self.device_type, "dtype": torch.float32}
         log.warning(f"OmniMoTModel: precision {self.precision}")

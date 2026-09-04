@@ -14,8 +14,13 @@ from typing import Any, Optional, Union
 from urllib.parse import urlparse
 
 import yaml
-from multistorageclient import StorageClient, StorageClientConfig
-from multistorageclient.types import Range
+try:
+    from multistorageclient import StorageClient, StorageClientConfig
+    from multistorageclient.types import Range
+except ImportError:
+    StorageClient = None
+    StorageClientConfig = None
+    Range = None
 
 import cosmos_framework.utils.easy_io.backends.auto_auth as auto
 from cosmos_framework.utils import log

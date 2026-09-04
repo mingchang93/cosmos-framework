@@ -71,6 +71,7 @@ if DEVICE == Device.NPU:
         import torch_npu
 
         torch_npu.npu.set_device(torch_npu.npu.current_device())
+        import torch_npu.contrib.transfer_to_npu  # auto-patch: import triggers cuda→npu replacement
     except ImportError:
         pass  # torch_npu not installed; all NPU-specific paths will fail gracefully
 

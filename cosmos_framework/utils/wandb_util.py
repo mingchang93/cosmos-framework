@@ -47,6 +47,8 @@ def init_wandb(config: Config, model: ImaginaireModel) -> None:
     else:
         config_job = config.job
     config_checkpoint = config.checkpoint
+    if config_job.wandb_mode == "disabled":
+        return
     wandb_project = get_wandb_project(config_job.project)
     # Try to fetch the W&B job ID for resuming training.
     wandb_id = _read_wandb_id(config_job, config_checkpoint)

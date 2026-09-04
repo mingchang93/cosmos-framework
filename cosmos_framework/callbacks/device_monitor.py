@@ -6,7 +6,10 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import psutil
-import pynvml
+try:
+    import pynvml
+except ImportError:
+    pynvml = None  # NPU: pynvml not available
 import torch
 import wandb
 
@@ -92,7 +95,10 @@ class DeviceMonitor(EveryN):
         self.log_memory_detail = log_memory_detail
 
     def on_train_start(self, model, iteration=0):
-        torch.cuda.reset_peak_memory_stats()
+        if torch.npu.is_available():
+            torch.npu.reset_peak_memory_stats()
+        else:
+            torch.cuda.reset_peak_memory_stats()
         self.world_size = distributed.get_world_size()
         self.rank = distributed.get_rank()
         config_job = self.config.job
@@ -102,7 +108,10 @@ class DeviceMonitor(EveryN):
             log.info(f"{self.name} callback: local_dir: {self.local_dir}")
 
         local_rank = int(os.getenv("LOCAL_RANK", 0))
-        self.handle = pynvml.nvmlDeviceGetHandleByIndex(local_rank)
+        if pynvml is not None:
+            self.handle = pynvml.nvmlDeviceGetHandleByIndex(local_rank)
+        else:
+            self.handle = None
 
     def every_n_impl(
         self,
@@ -122,20 +131,29 @@ class DeviceMonitor(EveryN):
             cpu_memory_usage = 0
         cpu_mem_gb = cpu_memory_usage / (1024**3)
 
-        peak_gpu_mem_gb = torch.cuda.max_memory_allocated() / (1024**3)
-        peak_gpu_mem_reserved_gb = torch.cuda.max_memory_reserved() / (1024**3)
-        temp = torch.cuda.temperature()
+        peak_gpu_mem_gb = (torch.npu.max_memory_allocated() if torch.npu.is_available() else torch.cuda.max_memory_allocated()) / (1024**3)
+        peak_gpu_mem_reserved_gb = (torch.npu.max_memory_reserved() if torch.npu.is_available() else torch.cuda.max_memory_reserved()) / (1024**3)
+        try:
+            temp = torch.cuda.temperature()
+        except Exception:
+            temp = 0
         try:
             power = torch.cuda.power_draw()
-        except Exception as e:
-            log.warning(f"Failed to get power draw with error {e}")
+        except Exception:
             power = 0
-        util = torch.cuda.utilization()
-        clock = torch.cuda.clock_rate()
+        util = torch.npu.utilization() if torch.npu.is_available() else torch.cuda.utilization()
+        try:
+            clock = torch.cuda.clock_rate()
+        except Exception:
+            clock = 0
 
-        memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
-        nvml_used_gpu_mem_gb = memory_info.used / (1024**3)
-        nvml_free_gpu_mem_gb = memory_info.free / (1024**3)
+        if pynvml is not None and self.handle is not None:
+            memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
+            nvml_used_gpu_mem_gb = memory_info.used / (1024**3)
+            nvml_free_gpu_mem_gb = memory_info.free / (1024**3)
+        else:
+            nvml_used_gpu_mem_gb = 0
+            nvml_free_gpu_mem_gb = 0
 
         prof_data = {
             "cpu_mem_gb": cpu_mem_gb,
@@ -173,7 +191,7 @@ class DeviceMonitor(EveryN):
         if self.rank == 0:
             log.info(f"{self.name} Stats:\n{summary_df.to_string()}")
             if self.log_memory_detail:
-                memory_stats = torch.cuda.memory_stats()
+                memory_stats = torch.npu.memory_stats() if torch.npu.is_available() else torch.cuda.memory_stats()
                 if wandb.run:
                     wandb_memory_info = {f"mem/{key}": memory_stats[key] for key in memory_stats.keys()}
                     wandb.log(wandb_memory_info, step=iteration)
@@ -186,4 +204,7 @@ class DeviceMonitor(EveryN):
                             os.path.join(self.s3_save_fp, f"memory_stats_{iteration:09d}.yaml"),
                         )
 
-        torch.cuda.reset_peak_memory_stats()
+        if torch.npu.is_available():
+            torch.npu.reset_peak_memory_stats()
+        else:
+            torch.cuda.reset_peak_memory_stats()

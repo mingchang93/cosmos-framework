@@ -130,7 +130,7 @@ def get_backend_list(arch_tag: int) -> list[str]:
         # NPU: arch_tag == 0 when no CUDA device is present. Try the NPU
         # backend which delegates to F.scaled_dot_product_attention — torch_npu
         # routes this to CANN's Flash Attention 2.
-        if arch_tag == 0:
+        if arch_tag in (0, 1):
             from cosmos_framework.model.attention.npu import NPU_SUPPORTED
 
             if NPU_SUPPORTED:

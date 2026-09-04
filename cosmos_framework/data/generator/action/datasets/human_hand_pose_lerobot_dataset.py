@@ -12,7 +12,10 @@ from typing import Any, Literal
 import numpy as np
 import pyarrow.parquet as pq
 import torch
-from lerobot.datasets.video_utils import decode_video_frames
+try:
+    from lerobot.datasets.video_utils import decode_video_frames
+except ImportError:
+    decode_video_frames = None
 
 from cosmos_framework.data.generator.action.utils.action_spec import ActionSpec, Pos, Rot, build_action_spec
 from cosmos_framework.data.generator.action.datasets.base_dataset import ActionBaseDataset

@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, Sequence, cast, override
 
 import pydantic
-import pynvml
+try:
+    import pynvml
+except ImportError:
+    pynvml = None
 from typing_extensions import assert_never
 from tyro.conf import Suppress
 

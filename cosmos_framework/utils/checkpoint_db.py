@@ -148,6 +148,26 @@ def _hf_download(cmd_args: list[str]) -> str:
     Callers that make repeated downloads can set
     ``IMAGINAIRE_HF_CLI_ENVIRONMENT`` to reuse a dedicated environment.
     """
+    # Offline mode: return local cache path if available
+    if os.environ.get("HF_HUB_OFFLINE") == "1":
+        repo_id = cmd_args[0] if cmd_args else ""
+        cache_dir = os.path.join(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "hub")
+        repo_dir = f"models--{repo_id.replace(chr(47), chr(45)+chr(45))}"
+        snapshot_dir = os.path.join(cache_dir, repo_dir, "snapshots")
+        if os.path.isdir(snapshot_dir):
+            snapshots = os.listdir(snapshot_dir)
+            if snapshots:
+                local_path = os.path.join(snapshot_dir, snapshots[0])
+                # Check if a specific file is requested (CheckpointFileHf)
+                # cmd_args format: [repo_id, --repo-type, ..., --revision, ..., filename]
+                file_args = [a for a in cmd_args if not a.startswith("--") and a != repo_id and a not in ("model", "dataset")]
+                if file_args:
+                    file_path = os.path.join(local_path, file_args[-1])
+                    if os.path.exists(file_path):
+                        log.info("HF offline mode: using local file " + file_path)
+                        return file_path
+                log.info("HF offline mode: using local cache " + local_path)
+                return local_path
     is_rank0 = os.environ.get("RANK", "0") == "0"
     hf_cli_environment = os.environ.get("IMAGINAIRE_HF_CLI_ENVIRONMENT")
     cmd = [

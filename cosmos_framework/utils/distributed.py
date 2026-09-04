@@ -306,7 +306,7 @@ def ensure_world_communicator(timeout_sec: float | None = None) -> None:
         timeout_sec = get_world_comm_timeout_sec()
 
     rank = get_rank()
-    on_cuda = dist.get_backend() == "nccl"
+    on_cuda = dist.get_backend() in ("nccl", "hccl")
     log.info(
         f"Building the {world_size}-rank world communicator (deadline {timeout_sec:.0f}s)",
         rank0_only=False,
@@ -322,10 +322,14 @@ def ensure_world_communicator(timeout_sec: float | None = None) -> None:
 
     start = time.monotonic()
     try:
-        probe = torch.ones(1, device="cuda" if on_cuda else "cpu", dtype=torch.float32)
+        _device = "npu" if dist.get_backend() == "hccl" else ("cuda" if on_cuda else "cpu")
+        probe = torch.ones(1, device=_device, dtype=torch.float32)
         dist.all_reduce(probe)
         if on_cuda:
-            torch.cuda.synchronize()
+            if dist.get_backend() == "hccl":
+                torch.npu.synchronize()
+            else:
+                torch.cuda.synchronize()
     finally:
         done.set()
     if probe.item() != float(world_size):

@@ -534,7 +534,8 @@ class Config:
 
         # broadcast job.name across all ranks to make sure it is consistent
         # otherwise, unaligned job names leads unaligned path to save checkpoints
-        job_name_tensor = torch.ByteTensor(bytearray(self.job.name, "utf-8")).cuda()
+        _device = os.environ.get("COSMOS_DEVICE", "cuda").lower()
+        job_name_tensor = torch.ByteTensor(bytearray(self.job.name, "utf-8")).to(_device)
         distributed.broadcast(job_name_tensor, 0)
         self.job.name = job_name_tensor.cpu().numpy().tobytes().decode("utf-8")
 

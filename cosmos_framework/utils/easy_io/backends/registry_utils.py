@@ -115,8 +115,12 @@ register_backend("local", LocalBackend, prefixes="")
 register_backend("http", HTTPBackend, prefixes=["http", "https"])
 
 if TRAINING:
-    from cosmos_framework.utils.easy_io.backends.msc_backend import MSCBackend
+    try:
+        from cosmos_framework.utils.easy_io.backends.msc_backend import MSCBackend
+    except ImportError:
+        MSCBackend = None  # multistorageclient not available (NPU env)
 
     # To avoid breaking backward Compatibility, 's3' is also used as a
     # prefix for MSCBackend
-    register_backend("s3", MSCBackend, prefixes=["s3"])
+    if MSCBackend is not None:
+        register_backend("s3", MSCBackend, prefixes=["s3"])

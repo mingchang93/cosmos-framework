@@ -9,6 +9,7 @@ NPU Backend: actual attention kernels.
 """
 
 import torch
+import torch_npu
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -88,46 +89,25 @@ def _varlen_sdpa(
     cumulative_seqlen_KV: Tensor,
     scale: float | None,
 ) -> Tensor:
-    """SDPA with block-diagonal mask built from cumulative sequence lengths."""
-    total_q = query.shape[1]
-    total_kv = key.shape[1]
-    device = query.device
-    dtype = query.dtype
-
-    mask = torch.full((1, 1, total_q, total_kv), float("-inf"), device=device, dtype=dtype)
-    for i in range(cumulative_seqlen_Q.shape[0] - 1):
-        q_start = cumulative_seqlen_Q[i].item()
-        q_end = cumulative_seqlen_Q[i + 1].item()
-        kv_start = cumulative_seqlen_KV[i].item()
-        kv_end = cumulative_seqlen_KV[i + 1].item()
-        mask[:, :, q_start:q_end, kv_start:kv_end] = 0.0
-
-    if is_causal:
-        for i in range(cumulative_seqlen_Q.shape[0] - 1):
-            q_start = cumulative_seqlen_Q[i].item()
-            q_end = cumulative_seqlen_Q[i + 1].item()
-            kv_start = cumulative_seqlen_KV[i].item()
-            kv_end = cumulative_seqlen_KV[i + 1].item()
-            q_len = q_end - q_start
-            kv_len = kv_end - kv_start
-            causal = torch.triu(
-                torch.full((q_len, kv_len), float("-inf"), device=device, dtype=dtype),
-                diagonal=1,
-            )
-            mask[:, :, q_start:q_end, kv_start:kv_end] = torch.maximum(
-                mask[:, :, q_start:q_end, kv_start:kv_end], causal
-            )
-
-    return F.scaled_dot_product_attention(
-        query.permute(0, 2, 1, 3),
-        key.permute(0, 2, 1, 3),
-        value.permute(0, 2, 1, 3),
-        attn_mask=mask,
-        scale=scale,
-        dropout_p=0.0,
-        is_causal=False,
-    ).permute(0, 2, 1, 3)
-
+    q_tnd = query.reshape(-1, query.shape[2], query.shape[3])
+    k_tnd = key.reshape(-1, key.shape[2], key.shape[3])
+    v_tnd = value.reshape(-1, value.shape[2], value.shape[3])
+    if q_tnd.shape[1] != k_tnd.shape[1]:
+        rep = q_tnd.shape[1] // k_tnd.shape[1]
+        k_tnd = k_tnd.repeat_interleave(rep, dim=1)
+        v_tnd = v_tnd.repeat_interleave(rep, dim=1)
+    actual_seq_qlen = cumulative_seqlen_Q[1:].tolist()
+    actual_seq_kvlen = cumulative_seqlen_KV[1:].tolist()
+    sparse_mode = 2 if is_causal else 0
+    _scale = scale if scale is not None else 1.0
+    output = torch_npu.npu_fusion_attention(
+        q_tnd, k_tnd, v_tnd, q_tnd.shape[1],
+        input_layout='TND',
+        actual_seq_qlen=actual_seq_qlen,
+        actual_seq_kvlen=actual_seq_kvlen,
+        scale=_scale, keep_prob=1.0, sparse_mode=sparse_mode,
+    )
+    return output[0].reshape(query.shape[0], query.shape[1], query.shape[2], query.shape[3])
 
 def _compute_lse(
     query: Tensor,

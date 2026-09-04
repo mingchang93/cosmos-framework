@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 import warnings
@@ -14,6 +15,10 @@ import torch.distributed as dist
 import torch.utils.data
 import tqdm
 import wandb
+if os.environ.get("WANDB_MODE") == "disabled":
+    wandb.log = lambda *a, **kw: None
+    wandb.finish = lambda *a, **kw: None
+    wandb.init = lambda *a, **kw: None
 
 from cosmos_framework.utils.lazy_config import instantiate
 from cosmos_framework.utils import distributed, log, misc, wandb_util

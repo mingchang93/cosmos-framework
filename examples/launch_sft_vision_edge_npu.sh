@@ -24,6 +24,8 @@
 #   bash examples/launch_sft_vision_edge_npu.sh
 
 export COSMOS_DEVICE=npu
+# NPU设备可见性: 4卡8die场景须设为0-7, 否则device_count只返回4个物理卡
+export ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 
 TOML_FILE="examples/toml/sft_config/vision_sft_edge.toml"
 : "${DATASET_PATH:=examples/data/BridgeData2-Subset-Synthetic-Captions/sft_dataset_bridge}"

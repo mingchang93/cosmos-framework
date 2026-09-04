@@ -29,7 +29,11 @@ from typing import Any, ClassVar
 import huggingface_hub.constants as _hf_const
 import numpy as np
 import torch
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+try:
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+except ImportError:
+    LeRobotDataset = None
+    LeRobotDatasetMetadata = None
 from torch.utils.data import Dataset
 
 _hf_offline_applied = False

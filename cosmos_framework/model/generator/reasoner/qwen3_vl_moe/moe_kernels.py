@@ -4,8 +4,24 @@
 from typing import Callable, Literal
 
 import torch
-import triton
-import triton.language as tl
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    class _TritonStub:
+        def jit(self, *args, **kwargs):
+            def decorator(fn):
+                return fn
+            if args and callable(args[0]):
+                return args[0]
+            return decorator
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+    triton = _TritonStub()
+    class _TLLanguageStub:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+    tl = _TLLanguageStub()
 
 # Set the token group alignment size for experts in MoE. This is implemented by
 # padding each expert size to the next multiple of TOKEN_GROUP_ALIGN_SIZE_M.

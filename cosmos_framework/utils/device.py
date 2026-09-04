@@ -6,7 +6,10 @@ import math
 import os
 from functools import wraps
 
-import pynvml
+try:
+    import pynvml
+except ImportError:
+    pynvml = None
 from loguru import logger as logging
 
 
