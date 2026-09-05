@@ -95,7 +95,7 @@ class DeviceMonitor(EveryN):
         self.log_memory_detail = log_memory_detail
 
     def on_train_start(self, model, iteration=0):
-        if torch.npu.is_available():
+        if hasattr(torch, "npu") and torch.npu.is_available():
             torch.npu.reset_peak_memory_stats()
         else:
             torch.cuda.reset_peak_memory_stats()
@@ -131,8 +131,8 @@ class DeviceMonitor(EveryN):
             cpu_memory_usage = 0
         cpu_mem_gb = cpu_memory_usage / (1024**3)
 
-        peak_gpu_mem_gb = (torch.npu.max_memory_allocated() if torch.npu.is_available() else torch.cuda.max_memory_allocated()) / (1024**3)
-        peak_gpu_mem_reserved_gb = (torch.npu.max_memory_reserved() if torch.npu.is_available() else torch.cuda.max_memory_reserved()) / (1024**3)
+        peak_gpu_mem_gb = (torch.npu.max_memory_allocated() if hasattr(torch, "npu") and torch.npu.is_available() else torch.cuda.max_memory_allocated()) / (1024**3)
+        peak_gpu_mem_reserved_gb = (torch.npu.max_memory_reserved() if hasattr(torch, "npu") and torch.npu.is_available() else torch.cuda.max_memory_reserved()) / (1024**3)
         try:
             temp = torch.cuda.temperature()
         except Exception:
@@ -141,7 +141,7 @@ class DeviceMonitor(EveryN):
             power = torch.cuda.power_draw()
         except Exception:
             power = 0
-        util = torch.npu.utilization() if torch.npu.is_available() else torch.cuda.utilization()
+        util = torch.npu.utilization() if hasattr(torch, "npu") and torch.npu.is_available() else torch.cuda.utilization()
         try:
             clock = torch.cuda.clock_rate()
         except Exception:
@@ -191,7 +191,7 @@ class DeviceMonitor(EveryN):
         if self.rank == 0:
             log.info(f"{self.name} Stats:\n{summary_df.to_string()}")
             if self.log_memory_detail:
-                memory_stats = torch.npu.memory_stats() if torch.npu.is_available() else torch.cuda.memory_stats()
+                memory_stats = torch.npu.memory_stats() if hasattr(torch, "npu") and torch.npu.is_available() else torch.cuda.memory_stats()
                 if wandb.run:
                     wandb_memory_info = {f"mem/{key}": memory_stats[key] for key in memory_stats.keys()}
                     wandb.log(wandb_memory_info, step=iteration)
@@ -204,7 +204,7 @@ class DeviceMonitor(EveryN):
                             os.path.join(self.s3_save_fp, f"memory_stats_{iteration:09d}.yaml"),
                         )
 
-        if torch.npu.is_available():
+        if hasattr(torch, "npu") and torch.npu.is_available():
             torch.npu.reset_peak_memory_stats()
         else:
             torch.cuda.reset_peak_memory_stats()
