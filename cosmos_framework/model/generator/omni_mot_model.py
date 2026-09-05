@@ -1504,7 +1504,7 @@ class OmniMoTModel(ImaginaireModel):
         dp_group, group_size = self._loss_averaging_group()
 
         # counts = [num_local_image_samples, num_local_video_samples]; exactly one is non-zero.
-        counts = torch.zeros(2, dtype=torch.float64, device=device)
+        counts = torch.zeros(2, dtype=torch.float32, device=device)
         counts[0 if is_image_batch else 1] = float(num_samples)
         if group_size > 1:
             torch.distributed.all_reduce(counts, op=torch.distributed.ReduceOp.SUM, group=dp_group)

@@ -455,10 +455,10 @@ class Qwen3VLMoeTextSparseMoeBlock(nn.Module):
         # Sum of per-token router entropy H = -sum(p_i * log p_i) across all tokens
         # seen since the last reset. Divided by stability_total_tokens in the
         # callback to get the mean entropy, then normalized by log(N) for [0, 1].
-        # float64 to avoid precision loss when accumulating over many steps.
+        # float32 (HCCL not support float64) for accumulation over steps.
         self.register_buffer(
             "sum_token_entropy",
-            torch.zeros(1, dtype=torch.float64),
+            torch.zeros(1, dtype=torch.float32),
             persistent=False,
         )
         # Sum of per-token soft-effective-experts exp(H(p_t)) across all tokens
@@ -468,17 +468,17 @@ class Qwen3VLMoeTextSparseMoeBlock(nn.Module):
         # mean_t exp(H_t) >= exp(mean_t H_t), and the difference matters when
         # per-token entropies are heterogeneous (e.g. mix of sharp and broad
         # router distributions). Owned and reset by MoEStabilityCallback.
-        # float64 to avoid precision loss when accumulating over many steps.
+        # float32 (HCCL not support float64) for accumulation over steps.
         self.register_buffer(
             "sum_per_token_soft_eff",
-            torch.zeros(1, dtype=torch.float64),
+            torch.zeros(1, dtype=torch.float32),
             persistent=False,
         )
         # Soft marginal usage P[e] = mean_t g[t, e], consumed and reset by
         # MoEStabilityCallback. Keep this separate from hard top-k dispatch counts.
         self.register_buffer(
             "sum_router_prob_per_expert",
-            torch.zeros(config.num_experts, dtype=torch.float64),
+            torch.zeros(config.num_experts, dtype=torch.float32),
             persistent=False,
         )
 
@@ -523,13 +523,13 @@ class Qwen3VLMoeTextSparseMoeBlock(nn.Module):
         token_entropy = -torch.sum(
             routing_probabilities * torch.log(routing_probabilities + ENTROPY_EPSILON), dim=-1
         )  # [num_tokens]
-        self.sum_token_entropy.add_(_weighted_sum(token_entropy, token_weight).to(torch.float64))
+        self.sum_token_entropy.add_(_weighted_sum(token_entropy, token_weight).to(torch.float32))
         # Per-token soft effective experts = exp(H(p_t)), bounded in [1, N].
         # We accumulate the sum here (not the mean) so the callback can compute
         # mean_t exp(H_t) over any reset window. Kept separate from
         # sum_token_entropy because exp(mean H) != mean exp(H) in general.
-        self.sum_per_token_soft_eff.add_(_weighted_sum(token_entropy.exp(), token_weight).to(torch.float64))
-        self.sum_router_prob_per_expert.add_(_weighted_sum(routing_probabilities, token_weight).to(torch.float64))
+        self.sum_per_token_soft_eff.add_(_weighted_sum(token_entropy.exp(), token_weight).to(torch.float32))
+        self.sum_router_prob_per_expert.add_(_weighted_sum(routing_probabilities, token_weight).to(torch.float32))
 
         # ── Co-activation counting ────────────────────────────────────────────
         # For every ordered pair (k1, k2) of top-K slots with k1 < k2, find the
@@ -880,17 +880,17 @@ class Qwen3VLMoeTextSparseMoeBlock(nn.Module):
         )
         self.register_buffer(
             "sum_token_entropy",
-            torch.zeros(1, dtype=torch.float64, device=buffer_device),
+            torch.zeros(1, dtype=torch.float32, device=buffer_device),
             persistent=False,
         )
         self.register_buffer(
             "sum_per_token_soft_eff",
-            torch.zeros(1, dtype=torch.float64, device=buffer_device),
+            torch.zeros(1, dtype=torch.float32, device=buffer_device),
             persistent=False,
         )
         self.register_buffer(
             "sum_router_prob_per_expert",
-            torch.zeros(self.num_experts, dtype=torch.float64, device=buffer_device),
+            torch.zeros(self.num_experts, dtype=torch.float32, device=buffer_device),
             persistent=False,
         )
         self.register_buffer(
