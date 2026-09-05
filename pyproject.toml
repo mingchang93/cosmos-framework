@@ -89,7 +89,7 @@ train = [
   "jupyter-compare-view",
   "jupyterlab",
   "kornia",
-  "lerobot",
+  "lerobot==0.5.0",
   "librosa",
   "lpips",
   "lz4",
@@ -350,7 +350,6 @@ required-environments = [
 [tool.uv.sources]
 flash-attn = { index = "cosmos"}
 flash-attn-3-nv = { index = "cosmos" }
-lerobot = { git = "https://github.com/mli0603/lerobot.git" }
 megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM.git", rev = "de56227" }
 natten = { index = "cosmos"}
 torch = { index = "pytorch"}
