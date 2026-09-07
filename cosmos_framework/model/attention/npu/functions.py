@@ -98,14 +98,29 @@ def _varlen_sdpa(
         v_tnd = v_tnd.repeat_interleave(rep, dim=1)
     actual_seq_qlen = cumulative_seqlen_Q[1:].tolist()
     actual_seq_kvlen = cumulative_seqlen_KV[1:].tolist()
-    sparse_mode = 2 if is_causal else 0
     _scale = scale if scale is not None else 1.0
+
+    # Causal varlen: sparse_mode=2 (leftUpCausal) REQUIRES an atten_mask — with
+    # no mask CANN treats it as "full computation" and silently drops causality.
+    # sparse_mode=2/3/4 use CANN's "attenmask compression" path, which needs a
+    # fixed 2048x2048 compressed lower-triangular mask (mask size is constant,
+    # not sequence-dependent); the kernel applies it causally within each
+    # sequence block, guided by actual_seq_qlen/actual_seq_kvlen.
+    sparse_mode = 2 if is_causal else 0
+    atten_mask = None
+    if is_causal:
+        atten_mask = torch.triu(
+            torch.ones(2048, 2048, dtype=torch.bool, device=query.device),
+            diagonal=1,
+        )
+
     output = torch_npu.npu_fusion_attention(
         q_tnd, k_tnd, v_tnd, q_tnd.shape[1],
         input_layout='TND',
         actual_seq_qlen=actual_seq_qlen,
         actual_seq_kvlen=actual_seq_kvlen,
         scale=_scale, keep_prob=1.0, sparse_mode=sparse_mode,
+        atten_mask=atten_mask,
     )
     return output[0].reshape(query.shape[0], query.shape[1], query.shape[2], query.shape[3])
 
