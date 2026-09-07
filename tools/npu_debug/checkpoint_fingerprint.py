@@ -7,10 +7,10 @@ output) matches the A800 original ``*.distcp``. The two checkpoints live on
 different machines that cannot reach each other, so this tool splits the check
 into two halves you run on each box and diff locally:
 
-  # on A3 (NPU):
-  python3 tools/npu_debug/checkpoint_fingerprint.py dump /workspace/tmp/checkpoint_base --out fp_a3.json
+  # on A3 (NPU) -- path = dir containing .metadata (the model/ subdir):
+  python3 tools/npu_debug/checkpoint_fingerprint.py dump /workspace/tmp/checkpoint_base/model --out fp_a3.json
   # on A800 (GPU):
-  python3 tools/npu_debug/checkpoint_fingerprint.py dump <path-to-Cosmos3-Edge> --out fp_a800.json
+  python3 tools/npu_debug/checkpoint_fingerprint.py dump <path-to-Cosmos3-Edge>/model --out fp_a800.json
   # copy the two small JSON files to one place, then:
   python3 tools/npu_debug/checkpoint_fingerprint.py compare fp_a3.json fp_a800.json
 
@@ -25,22 +25,9 @@ import hashlib
 import json
 
 import torch
+import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint import FileSystemReader
 from torch.distributed.checkpoint.metadata import TensorStorageMetadata
-
-
-def _read_full(reader: FileSystemReader, fqn: str, meta: TensorStorageMetadata) -> torch.Tensor:
-    """Read one tensor, reassembling sharded (multi-chunk) tensors by offset."""
-    chunks = meta.chunks
-    first = reader.read_tensor(fqn, chunks[0])
-    if len(chunks) == 1:
-        return first.detach().cpu()
-    full = torch.empty(meta.size, dtype=first.dtype, device=first.device)
-    for chunk in chunks:
-        part = reader.read_tensor(fqn, chunk)
-        sl = tuple(slice(o, o + s) for o, s in zip(chunk.offsets, chunk.sizes))
-        full[sl] = part
-    return full.detach().cpu()
 
 
 def _fingerprint(t: torch.Tensor) -> dict:
@@ -58,11 +45,18 @@ def _fingerprint(t: torch.Tensor) -> dict:
 def _load_tensors(path: str) -> dict[str, torch.Tensor]:
     reader = FileSystemReader(path)
     metadata = reader.read_metadata()
-    out = {}
+    # Build placeholder tensors from the metadata, then let dcp.load fill them in.
+    # dcp.load is the framework's own load path (handles the __{rank}_{i}.distcp
+    # file layout and sharded chunks); FileSystemReader has no public read_tensor.
+    state_dict: dict[str, torch.Tensor] = {}
     for fqn, meta in metadata.state_dict_metadata.items():
-        if isinstance(meta, TensorStorageMetadata):
-            out[fqn] = _read_full(reader, fqn, meta)
-    return out
+        if not isinstance(meta, TensorStorageMetadata):
+            continue
+        props = getattr(meta, "properties", None)
+        dtype = getattr(props, "dtype", torch.float32) if props is not None else torch.float32
+        state_dict[fqn] = torch.empty(meta.size, dtype=dtype)
+    dcp.load(state_dict, storage_reader=reader, no_dist=True)
+    return {fqn: t.detach().cpu() for fqn, t in state_dict.items()}
 
 
 def cmd_dump(args) -> None:
