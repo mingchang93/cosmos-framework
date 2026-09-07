@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: OpenMDW-1.1
 
 import json
+import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -1095,6 +1096,24 @@ def _real_token_mask(num_rows: int, num_real_tokens: int, device: torch.device) 
     return torch.arange(num_rows, device=device) < num_real_tokens
 
 
+# ponytail: temporary per-op isolation hook for the NPU-vs-GPU loss-gap debug.
+# Off by default; set COSMOS3_DEBUG_LAYER_STATS=1 to print per-layer/submodule
+# stats for the gen sequence so NPU and GPU logs can be diffed to find the first
+# divergent op. Remove once the loss-gap root cause is localized.
+_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
+
+
+def _debug_layer_stats(tag: str, t: torch.Tensor) -> None:
+    if not _DEBUG_LAYER_STATS:
+        return
+    t = t.float()
+    print(
+        f"[layer_stats] {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"min={t.min().item():.6f} max={t.max().item():.6f}",
+        flush=True,
+    )
+
+
 class MoTDecoderLayer(nn.Module):
     """
     Unified MoT (Mixture of Transformers) decoder layer.
@@ -1121,6 +1140,7 @@ class MoTDecoderLayer(nn.Module):
         gen_moe_top_k: int | None = None,
     ) -> None:
         super().__init__()
+        self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
         self.self_attn = PackedAttentionMoT(
             config,
@@ -1184,11 +1204,13 @@ class MoTDecoderLayer(nn.Module):
             gen_only: When True, skip the understanding pathway (und K/V come from cache).
         """
         # Pre-Attention layernorm
+        _debug_layer_stats(f"L{self.layer_idx}.in_gen", get_gen_seq(input))
         pack_norm_out = from_und_gen_splits(
             self.input_layernorm(get_und_seq(input)),  # [N_und,hidden_size]
             self.input_layernorm_moe_gen(get_gen_seq(input)),  # [N_gen,hidden_size]
             input,
         )  # [N_und+N_gen,hidden_size]
+        _debug_layer_stats(f"L{self.layer_idx}.ln1_gen", get_gen_seq(pack_norm_out))
 
         # Self Attention + Residual
         kv_to_store: KVToStore | None = None
@@ -1240,7 +1262,10 @@ class MoTDecoderLayer(nn.Module):
                 memory_value=memory_value,
             )
             residual_und = get_und_seq(input) + get_und_seq(pack_attn_out)  # [N_und,hidden_size]
-            residual_gen = get_gen_seq(input) + get_gen_seq(pack_attn_out)  # [N_gen,hidden_size]
+            attn_gen = get_gen_seq(pack_attn_out)  # [N_gen,hidden_size]
+            _debug_layer_stats(f"L{self.layer_idx}.attn_gen", attn_gen)
+            residual_gen = get_gen_seq(input) + attn_gen  # [N_gen,hidden_size]
+            _debug_layer_stats(f"L{self.layer_idx}.attn_res_gen", residual_gen)
 
         # Pre-MLP layernorm and processing
         lbl_metadata_dict: dict[str, LBLMetadata] = dict()
@@ -1279,6 +1304,7 @@ class MoTDecoderLayer(nn.Module):
             # STANDARD PATH: Process both und and gen tokens
             ln_out_und = self.post_attention_layernorm(residual_und)  # [N_und,hidden_size]
             ln_out_gen = self.post_attention_layernorm_moe_gen(residual_gen)  # [N_gen,hidden_size]
+            _debug_layer_stats(f"L{self.layer_idx}.ln2_gen", ln_out_gen)
 
             # MASK MLP PADDING ===============
             # NOTE: This is only need for the MoE auxiliary loss computation and to avoid
@@ -1307,6 +1333,7 @@ class MoTDecoderLayer(nn.Module):
                 num_samples=gen_num_samples,
             )
             # mlp_out_gen: [N_gen,hidden_size], zero on the padding rows
+            _debug_layer_stats(f"L{self.layer_idx}.mlp_gen", mlp_out_gen)
 
             if lbl_metadata_und is not None:
                 lbl_metadata_dict["und"] = lbl_metadata_und
@@ -1315,6 +1342,7 @@ class MoTDecoderLayer(nn.Module):
 
             mlp_out_und_seq = residual_und + mlp_out_und  # [N_und,hidden_size]
             mlp_out_gen_seq = residual_gen + mlp_out_gen  # [N_gen,hidden_size]
+            _debug_layer_stats(f"L{self.layer_idx}.out_gen", mlp_out_gen_seq)
 
         return from_und_gen_splits(mlp_out_und_seq, mlp_out_gen_seq, input), lbl_metadata_dict, kv_to_store
 
