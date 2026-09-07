@@ -115,7 +115,9 @@ class TimestepEmbedder(nn.Module):
         """
         if frequencies is None:
             frequencies = TimestepEmbedder._build_timestep_frequencies(dim, max_period, t.device)  # [D/2]
+        _debug_embed_stats("frequencies", frequencies)
         args = t[:, None] * frequencies[None]  # [N,D/2]
+        _debug_embed_stats("args", args)
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)  # [N,D]
         if dim % 2:
             embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)  # [N,D+1]
