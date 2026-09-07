@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: OpenMDW-1.1
 
+import os
 import math
 
 import torch
@@ -25,6 +26,27 @@ def has_noisy_tokens(modality_data: ModalityData | None) -> bool:
 # Reference:
 # DiT: https://github.com/facebookresearch/DiT/blob/main/models.py
 # --------------------------------------------------------
+# ponytail: temporary isolation hook for the NPU-vs-GPU loss-gap debug (off by
+# default; set COSMOS3_DEBUG_LAYER_STATS=1). Logs the two embedder stages so the
+# sinusoidal vs MLP compute divergence can be separated.
+_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
+
+
+def _debug_embed_stats(tag: str, t: torch.Tensor) -> None:
+    if not _DEBUG_LAYER_STATS:
+        return
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = -1
+    t = t.float()
+    print(
+        f"[embed_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"min={t.min().item():.6f} max={t.max().item():.6f}",
+        flush=True,
+    )
+
+
 class TimestepEmbedder(nn.Module):
     """
     Embeds scalar timesteps into vector representations.
@@ -105,7 +127,9 @@ class TimestepEmbedder(nn.Module):
             self.frequency_embedding_size,
             frequencies=self._timestep_frequencies,
         )
+        _debug_embed_stats("t_freq", t_freq)
         t_emb = self.mlp(t_freq)  # [N,hidden_size]
+        _debug_embed_stats("t_emb", t_emb)
         return t_emb
 
 
