@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: OpenMDW-1.1
 
+import os
 from typing import Callable
 
 import torch
@@ -280,6 +281,10 @@ def create_text_experts(
     implementation_type: str = "naive",
     top_k: int | None = None,
 ) -> nn.Module:
+    # Diagnostic switch for the NPU-vs-GPU loss gap: force the naive
+    # (per-expert standard matmul) path with COSMOS3_MOE_IMPL=naive to A/B-test
+    # whether torch._grouped_mm is the source of the divergence. Off by default.
+    implementation_type = os.environ.get("COSMOS3_MOE_IMPL", implementation_type)
     if implementation_type == "naive":
         return Qwen3VLMoeTextExpertsNaive(config)
     elif implementation_type == "grouped_mm":
