@@ -797,7 +797,9 @@ class Cosmos3VFMNetwork(PreTrainedModel):
             packed_tokens = packed_tokens + modality_embed.view(1, -1)  # [total_patches,hidden_size]
 
         if modality.mse_loss_indexes.numel() > 0:
+            _debug_embed_stats("raw_timesteps", modality.timesteps.float())
             timesteps = modality.timesteps.to(dtype=torch.float32) * self.timestep_scale  # [N_noisy_frames]
+            _debug_embed_stats("scaled_timesteps", timesteps)
             packed_timestep_embeds = self._embed_packed_timesteps(timesteps, packed_seq)  # [N_noisy_frames,hidden_size]
             packed_timestep_embeds = packed_timestep_embeds.to(target_dtype)  # [N_noisy_frames,hidden_size]
             _debug_embed_stats("timestep_embed", packed_timestep_embeds)
