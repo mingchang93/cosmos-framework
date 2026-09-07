@@ -38,6 +38,7 @@ EXTRA_DATASET_CHECK='[[ -f "$DATASET_PATH/train/video_dataset_file.jsonl" ]] || 
 # graphs, and route distributed backend through HCCL.
 TAIL_OVERRIDES=(
     "model.config.device_type=npu"
+    "trainer.max_iter=1"
 )
 
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"

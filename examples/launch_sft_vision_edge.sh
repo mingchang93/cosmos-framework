@@ -25,4 +25,8 @@ TOML_FILE="examples/toml/sft_config/vision_sft_edge.toml"
 
 EXTRA_DATASET_CHECK='[[ -f "$DATASET_PATH/train/video_dataset_file.jsonl" ]] || { echo "ERROR: missing $DATASET_PATH/train/video_dataset_file.jsonl" >&2; exit 1; }'
 
+TAIL_OVERRIDES=(
+    "trainer.max_iter=1"
+)
+
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"
