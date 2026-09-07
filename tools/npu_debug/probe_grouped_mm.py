@@ -28,7 +28,7 @@ import torch
 
 
 def _device() -> torch.device:
-    if torch.npu.is_available():
+    if hasattr(torch, "npu") and torch.npu.is_available():
         return torch.device("npu")
     if torch.cuda.is_available():
         return torch.device("cuda")
