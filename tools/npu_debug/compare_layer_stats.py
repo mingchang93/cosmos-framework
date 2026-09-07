@@ -23,22 +23,29 @@ import argparse
 import re
 
 _LINE = re.compile(
-    r"\[layer_stats\] L(\d+)\.(\w+) mean=(-?[\d.eE+-]+) std=(-?[\d.eE+-]+) min=(-?[\d.eE+-]+) max=(-?[\d.eE+-]+)"
+    r"\[layer_stats\](?: rank=(-?\d+))? L(\d+)\.(\w+) mean=(-?[\d.eE+-]+) std=(-?[\d.eE+-]+) min=(-?[\d.eE+-]+) max=(-?[\d.eE+-]+)"
 )
 
 _BOUNDARIES = ["in_gen", "ln1_gen", "attn_gen", "attn_res_gen", "ln2_gen", "mlp_gen", "out_gen"]
 
 
-def _parse(path: str) -> dict[tuple[int, str], tuple[float, float]]:
+def _parse(path: str, rank: int | None) -> dict[tuple[int, str], tuple[float, float]]:
     stats: dict[tuple[int, str], tuple[float, float]] = {}
+    seen_ranks: set[int] = set()
     for line in open(path):
         m = _LINE.search(line)
         if not m:
             continue
-        key = (int(m.group(1)), m.group(2))
+        r = int(m.group(1)) if m.group(1) is not None else -1
+        seen_ranks.add(r)
+        if rank is not None and r != rank:
+            continue
+        key = (int(m.group(2)), m.group(3))
         if key in stats:
-            print(f"[warn] duplicate {key} in {path} — multi-rank dump? filter to one rank first")
-        stats[key] = (float(m.group(3)), float(m.group(4)))  # (mean, std)
+            print(f"[warn] duplicate {key} for rank {r} in {path} (gradient-checkpointing recompute?)")
+        stats[key] = (float(m.group(4)), float(m.group(5)))  # (mean, std)
+    if rank is None and len(seen_ranks) > 1:
+        print(f"[warn] {path} contains {len(seen_ranks)} ranks {sorted(seen_ranks)}; pass --rank to filter")
     return stats
 
 
@@ -46,11 +53,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("npu_dump")
     ap.add_argument("gpu_dump")
+    ap.add_argument("--rank", type=int, default=None, help="filter to this rank (default: use all lines, warn if multi-rank)")
     ap.add_argument("--threshold", type=float, default=0.01, help="std relative-diff threshold (default 1%%)")
     args = ap.parse_args()
 
-    npu = _parse(args.npu_dump)
-    gpu = _parse(args.gpu_dump)
+    npu = _parse(args.npu_dump, args.rank)
+    gpu = _parse(args.gpu_dump, args.rank)
     layers = sorted({l for l, _ in set(npu) | set(gpu)})
 
     first = None

@@ -1106,9 +1106,13 @@ _DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
 def _debug_layer_stats(tag: str, t: torch.Tensor) -> None:
     if not _DEBUG_LAYER_STATS:
         return
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = -1
     t = t.float()
     print(
-        f"[layer_stats] {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"[layer_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
         f"min={t.min().item():.6f} max={t.max().item():.6f}",
         flush=True,
     )
