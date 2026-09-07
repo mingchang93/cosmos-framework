@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: OpenMDW-1.1
 
+import os
 import math
 from collections.abc import Sequence
 from typing import List, Tuple
@@ -785,10 +786,13 @@ class Cosmos3VFMNetwork(PreTrainedModel):
         )
         assert isinstance(modality.mse_loss_indexes, torch.Tensor)
 
+        _debug_embed_stats("raw_tokens", modality.tokens)
         packed_patches, original_latent_shapes = self.patchify_and_pack_latents(
             modality.tokens, modality.token_shapes, latent_channel=latent_channel
         )  # [total_patches,patch_latent_dim]
+        _debug_embed_stats("packed_patches", packed_patches)
         packed_tokens = vae2llm(packed_patches.to(target_dtype))  # [total_patches,hidden_size]
+        _debug_embed_stats("vae2llm_out", packed_tokens)
         if modality_embed is not None:
             packed_tokens = packed_tokens + modality_embed.view(1, -1)  # [total_patches,hidden_size]
 
@@ -796,6 +800,7 @@ class Cosmos3VFMNetwork(PreTrainedModel):
             timesteps = modality.timesteps.to(dtype=torch.float32) * self.timestep_scale  # [N_noisy_frames]
             packed_timestep_embeds = self._embed_packed_timesteps(timesteps, packed_seq)  # [N_noisy_frames,hidden_size]
             packed_timestep_embeds = packed_timestep_embeds.to(target_dtype)  # [N_noisy_frames,hidden_size]
+            _debug_embed_stats("timestep_embed", packed_timestep_embeds)
 
             packed_tokens = _apply_timestep_embeds_to_noisy_tokens(
                 packed_tokens=packed_tokens,
@@ -803,6 +808,7 @@ class Cosmos3VFMNetwork(PreTrainedModel):
                 noisy_frame_indexes=modality.noisy_frame_indexes,
                 token_shapes=modality.token_shapes,
             )  # [total_patches,hidden_size]
+            _debug_embed_stats("after_timestep", packed_tokens)
 
         packed_sequence[modality.sequence_indexes] = (
             packed_tokens  # [total_patches,hidden_size] scattered into [N_total,hidden_size]
@@ -1514,6 +1520,28 @@ def _multiview_mask_items(packed_seq: PackedSequence) -> list[list[MaskItem]]:
                 lidar_cursor += 1
         items_per_sample.append(sample_items)
     return items_per_sample
+
+
+# ponytail: temporary embedding-isolation hook for the NPU-vs-GPU loss-gap debug.
+# Off by default; set COSMOS3_DEBUG_LAYER_STATS=1 to print stats at each step of
+# the vision embedding (raw latents -> patchify -> vae2llm -> timestep -> apply)
+# so NPU and GPU logs can be diffed to find the ~1.4x scaling source.
+_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
+
+
+def _debug_embed_stats(tag: str, t: torch.Tensor) -> None:
+    if not _DEBUG_LAYER_STATS:
+        return
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = -1
+    t = t.float()
+    print(
+        f"[embed_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"min={t.min().item():.6f} max={t.max().item():.6f}",
+        flush=True,
+    )
 
 
 def _apply_timestep_embeds_to_noisy_tokens(
