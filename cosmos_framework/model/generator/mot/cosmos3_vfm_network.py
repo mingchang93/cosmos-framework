@@ -1529,13 +1529,15 @@ def _multiview_mask_items(packed_seq: PackedSequence) -> list[list[MaskItem]]:
 _DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
 
 
-def _debug_embed_stats(tag: str, t: torch.Tensor) -> None:
+def _debug_embed_stats(tag: str, t: torch.Tensor | list | tuple) -> None:
     if not _DEBUG_LAYER_STATS:
         return
     if torch.distributed.is_available() and torch.distributed.is_initialized():
         rank = torch.distributed.get_rank()
     else:
         rank = -1
+    if isinstance(t, (list, tuple)):
+        t = torch.cat([x.reshape(-1) for x in t]) if t else torch.zeros(0)
     t = t.float()
     print(
         f"[embed_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
