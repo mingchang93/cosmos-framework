@@ -279,6 +279,16 @@ if __name__ == "__main__":
     if args.deterministic:
         _setup_deterministic_env_and_backends()
 
+    # T2.5.1: msprobe seed_all for cross-platform PRNG alignment
+    # seed=42 aligns with trainer.seed (TOML config)
+    # mode=True: torch.use_deterministic_algorithms(True) + NPU/GPU env vars
+    # rm_dropout=True: force all dropout p=0 for precision comparison
+    # warn_only restored after seed_all (mode=True sets strict deterministic)
+    from msprobe.pytorch import seed_all
+    seed_all(seed=42, mode=True, rm_dropout=True)
+    torch.use_deterministic_algorithms(mode=True, warn_only=True)
+    logging.info("T2.5.1: msprobe seed_all(seed=42, mode=True, rm_dropout=True) + warn_only restored.")
+
     config = load_experiment_from_toml(args.sft_toml, extra_overrides=args.opts)
 
     # log_reproducible_setup reads args.config for telemetry; this entrypoint
