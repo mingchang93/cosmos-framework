@@ -1989,7 +1989,7 @@ class OmniMoTModel(ImaginaireModel):
         x0_vision = gen_data_clean.x0_tokens_vision  # list of [C,T,H,W]
         assert x0_vision is not None, "Vision tokens are required for VFM noising."
         epsilon_vision = [
-            torch.randn(x0_vision_i.size(), generator=noise_gen, **self.tensor_kwargs_fp32) for x0_vision_i in x0_vision
+            torch.randn(x0_vision_i.size(), generator=noise_gen, device="cpu", dtype=torch.float32).to(**self.tensor_kwargs_fp32) for x0_vision_i in x0_vision
         ]  # list of [C,T,H,W]
         # Under CP, every rank holds the same x0 (the post-tokenizer payload is broadcast
         # round-robin above) but each samples its own ε from a rank-divergent RNG. Broadcasting
@@ -2036,7 +2036,7 @@ class OmniMoTModel(ImaginaireModel):
             )
             assert sigmas_lidar is not None, "sigmas_lidar required when LiDAR tokens exist"
             epsilon_lidar = [
-                torch.randn(x0_i.size(), generator=noise_gen, **self.tensor_kwargs_fp32) for x0_i in x0_lidar
+                torch.randn(x0_i.size(), generator=noise_gen, device="cpu", dtype=torch.float32).to(**self.tensor_kwargs_fp32) for x0_i in x0_lidar
             ]  # list of [C,T,H,W]
             context_parallel_broadcast_tensor_list(epsilon_lidar, self.parallel_dims)
             # sigmas_lidar[i] is (1,) → view (1,1,1), broadcast against condition_mask [T,1,1].
@@ -2082,7 +2082,7 @@ class OmniMoTModel(ImaginaireModel):
                 ]  # list of [T,action_dim]
             else:
                 epsilon_action = [
-                    torch.randn(x0_action_i.size(), generator=noise_gen, **self.tensor_kwargs_fp32)
+                    torch.randn(x0_action_i.size(), generator=noise_gen, device="cpu", dtype=torch.float32).to(**self.tensor_kwargs_fp32)
                     for x0_action_i in x0_action
                 ]  # list of [T,action_dim]
                 context_parallel_broadcast_tensor_list(epsilon_action, self.parallel_dims)
