@@ -124,10 +124,16 @@ class TimestepEmbedder(nn.Module):
         return embedding
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:  # t: [N], returns [N,hidden_size]
+        # Recompute the frequency table on CPU each forward rather than trusting
+        # the registered buffer, which FSDP meta-device materialization leaves
+        # corrupted on NPU (garbage values observed in _timestep_frequencies).
+        frequencies = self._build_timestep_frequencies(
+            self.frequency_embedding_size, max_period=10000, device=t.device
+        )
         t_freq = self.timestep_embedding(  # [N,frequency_embedding_size]
             t,
             self.frequency_embedding_size,
-            frequencies=self._timestep_frequencies,
+            frequencies=frequencies,
         )
         _debug_embed_stats("t_freq", t_freq)
         t_emb = self.mlp(t_freq)  # [N,hidden_size]
