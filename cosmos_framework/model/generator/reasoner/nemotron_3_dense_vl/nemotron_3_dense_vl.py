@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import functools
+import os
 
 import torch
 import torch.nn.functional as F
@@ -80,6 +81,27 @@ class Nemotron3DenseVLMLP(nn.Module):
         return self.down_proj(self.act_fn(self.up_proj(x)))
 
 
+# ponytail: temporary RoPE-buffer isolation hook for the NPU-vs-GPU loss-gap debug.
+# Off by default; set COSMOS3_DEBUG_LAYER_STATS=1 to print inv_freq stats so we can
+# see whether this persistent=False RoPE buffer is corrupted like _timestep_frequencies.
+_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
+
+
+def _debug_buffer_stats(tag: str, t: torch.Tensor) -> None:
+    if not _DEBUG_LAYER_STATS:
+        return
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = -1
+    t = t.float()
+    print(
+        f"[embed_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"min={t.min().item():.6f} max={t.max().item():.6f}",
+        flush=True,
+    )
+
+
 class MultiModalRotaryEmbedding(nn.Module):
     inv_freq: torch.Tensor
 
@@ -119,9 +141,14 @@ class MultiModalRotaryEmbedding(nn.Module):
     @torch.no_grad()
     @dynamic_rope_update
     def forward(self, x: torch.Tensor, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        _debug_buffer_stats("rope_inv_freq", self.inv_freq)
+        # Recompute on CPU rather than trusting the buffer, which FSDP meta-device
+        # materialization leaves corrupted on NPU (same class as _timestep_frequencies).
+        inv_freq, _ = self.compute_default_rope_parameters(self.config, None)
+        inv_freq = inv_freq.to(x.device)
         if position_ids.ndim == 2:
             position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
-        inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1)
+        inv_freq_expanded = inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1)
         position_ids_expanded = position_ids[:, :, None, :].float()
         device_type = x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
         with torch.autocast(device_type=device_type, enabled=False):
