@@ -162,6 +162,11 @@ class MultiModalRotaryEmbedding(nn.Module):
     def init_weights(self, buffer_device: torch.device | None = None) -> None:
         inv_freq, self.attention_scaling = self.compute_default_rope_parameters(self.config, buffer_device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+        # Mirror __init__: original_inv_freq is the un-extrapolated table used by
+        # dynamic_rope_update for long sequences. It must be reconstructed here too,
+        # otherwise `to_empty` garbage survives on it (harmless for the default rope
+        # type, but a latent landmine for any dynamic-rope config).
+        self.register_buffer("original_inv_freq", inv_freq.clone(), persistent=False)
 
 
 class Nemotron3DenseVLPreTrainedModel(PreTrainedModel):
