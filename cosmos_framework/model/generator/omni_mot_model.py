@@ -418,10 +418,12 @@ class OmniMoTModel(ImaginaireModel):
 
         with misc.timer("meta to cuda and broadcast model states"):
             net.to_empty(device=self.device_type)
-            if self.device_type == "cuda":
-                # Weight initialization is not needed for other devices (cpu,
-                # meta), since they are only for checkpoint conversion and smoke
-                # tests.
+            if self.device_type in ("cuda", "npu"):
+                # Recompute persistent=False buffers (RoPE inv_freq, timestep
+                # frequencies, …). `to_empty` materializes them as uninitialized
+                # garbage, and they are not in the checkpoint, so this is the only
+                # place they get their values. Skipped only for cpu/meta, which are
+                # checkpoint-conversion and smoke-test devices.
                 net.init_weights(buffer_device=self.device_type)
                 if lora_enabled:
                     self._init_lora_weights_post_materialization(net)
