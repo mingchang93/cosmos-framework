@@ -1982,7 +1982,7 @@ class OmniMoTModel(ImaginaireModel):
         noise_gen: torch.Generator | None = None
         if iteration is not None and torch.are_deterministic_algorithms_enabled():
             rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-            noise_gen = torch.Generator(device=self.tensor_kwargs_fp32["device"])
+            noise_gen = torch.Generator(device="cpu")  # T2.5.7: CPU PRNG for cross-platform consistency
             noise_gen.manual_seed(iteration * 65536 + rank + 32768)
 
         # Vision
