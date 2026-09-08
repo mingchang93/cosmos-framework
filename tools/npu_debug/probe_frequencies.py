@@ -36,6 +36,9 @@ def _golden(dim: int = 256, max_period: int = 10000) -> torch.Tensor:
 
 
 def _check(label: str, buf: torch.Tensor, golden: torch.Tensor) -> None:
+    if buf.device.type == "meta":
+        print(f"{label:48s} <meta tensor, no data>")
+        return
     buf = buf.detach().cpu().float()
     err = (buf - golden).abs().max().item()
     print(
