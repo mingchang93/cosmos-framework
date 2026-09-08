@@ -3,6 +3,7 @@
 
 import functools
 import math
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
@@ -1617,6 +1618,27 @@ class Qwen3VLMoeVisionModel(Qwen3VLMoePreTrainedModel):
         return hidden_states, deepstack_feature_lists
 
 
+# ponytail: temporary RoPE-buffer isolation hook for the NPU-vs-GPU loss-gap debug.
+# Off by default; set COSMOS3_DEBUG_LAYER_STATS=1 to print inv_freq stats so we can
+# see whether this persistent=False RoPE buffer is corrupted like _timestep_frequencies.
+_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
+
+
+def _debug_buffer_stats(tag: str, t: torch.Tensor) -> None:
+    if not _DEBUG_LAYER_STATS:
+        return
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = -1
+    t = t.float()
+    print(
+        f"[embed_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"min={t.min().item():.6f} max={t.max().item():.6f}",
+        flush=True,
+    )
+
+
 class Qwen3VLMoeTextRotaryEmbedding(nn.Module):
     def __init__(self, config: Qwen3VLMoeTextConfig):
         super().__init__()
@@ -1658,6 +1680,7 @@ class Qwen3VLMoeTextRotaryEmbedding(nn.Module):
     @torch.no_grad()
     @dynamic_rope_update  # power user: used with advanced RoPE types (e.g. dynamic rope)
     def forward(self, x, position_ids):
+        _debug_buffer_stats("rope_inv_freq", self.inv_freq)
         assert self.inv_freq.dtype == torch.float32, f"inv_freq must be float32, but got {self.inv_freq.dtype}"
         assert position_ids.dtype in [torch.long, torch.float32], (
             f"position_ids must be long or float32, but got {position_ids.dtype}"
