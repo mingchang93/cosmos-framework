@@ -150,7 +150,7 @@ class RectifiedFlow:
         generator = None
         if iteration is not None and torch.are_deterministic_algorithms_enabled():
             rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-            generator = torch.Generator()
+            generator = torch.Generator(device="cpu")  # T2.5.7: CPU PRNG for cross-platform consistency
             generator.manual_seed(iteration * 65536 + rank)
         time = self.train_time_sampler(
             batch_size, device=self.device, dtype=self.dtype, generator=generator, shifts=shifts

@@ -2125,7 +2125,7 @@ class OmniMoTModel(ImaginaireModel):
             )
             sound_batch_size = len(packed_sequence.sound.condition_mask)
             epsilon_sound = [
-                torch.randn(x0_i.size(), generator=noise_gen, **self.tensor_kwargs_fp32) for x0_i in x0_sound
+                torch.randn(x0_i.size(), generator=noise_gen, device="cpu", dtype=torch.float32).to(**self.tensor_kwargs_fp32) for x0_i in x0_sound
             ]  # list of [C,T_sound]
             context_parallel_broadcast_tensor_list(epsilon_sound, self.parallel_dims)
             # Conditioning frames are zeroed via (1 - condition_mask) in all modes (base/TF/DF).
