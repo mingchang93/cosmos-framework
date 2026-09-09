@@ -368,7 +368,7 @@ class VLMTokensPerSec(EveryN):
                 local_useful_tps,
                 *cause_values,
             ],
-            dtype=torch.float64,
+            dtype=torch.float32,  # float32: HCCL (NPU) all_reduce rejects kDouble
             device=reduce_device,
         )
         peak_allocated_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
@@ -382,10 +382,10 @@ class VLMTokensPerSec(EveryN):
                 local_useful_tps,
                 local_predicted_microbatch_ms,
             ],
-            dtype=torch.float64,
+            dtype=torch.float32,  # float32: HCCL (NPU) all_reduce rejects kDouble
             device=reduce_device,
         )
-        minimum_useful_tps = torch.tensor([local_useful_tps], dtype=torch.float64, device=reduce_device)  # [1]
+        minimum_useful_tps = torch.tensor([local_useful_tps], dtype=torch.float32, device=reduce_device)  # [1]
         if world_size > 1:
             dist.all_reduce(sums, op=dist.ReduceOp.SUM)
             dist.all_reduce(maxima, op=dist.ReduceOp.MAX)

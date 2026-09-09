@@ -217,7 +217,8 @@ class IterSpeed(EveryN):
         """
         n = len(values)
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        local = torch.tensor(values, dtype=torch.float64, device=device)
+        # float32 (not float64): HCCL (NPU) all_reduce does not support kDouble.
+        local = torch.tensor(values, dtype=torch.float32, device=device)
 
         if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
             if n == 0:
