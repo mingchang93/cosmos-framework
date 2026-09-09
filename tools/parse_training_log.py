@@ -15,25 +15,46 @@ import csv
 import re
 import sys
 
-_ITER_RE = re.compile(r"Iteration\s+(\d+):")
+_ITER_WARMUP_RE = re.compile(r"Iteration\s+(\d+):")
+_ITER_SPEED_RE = re.compile(r"\b(\d+)\s*:\s*iter_speed\b")
 _LOSS_RE = re.compile(
     r"Loss:\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|nan|inf)", re.IGNORECASE
 )
 _TIME_RE = re.compile(
     r"Time:\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*s\b", re.IGNORECASE
 )
+_SPEED_RE = re.compile(
+    r"iter_speed\s+([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s+seconds\s+per\s+iteration",
+    re.IGNORECASE,
+)
 
 
 def parse_line(line: str):
-    """Return (iteration, loss, time) for a matching line, else None."""
-    m = _ITER_RE.search(line)
-    if not m:
-        return None
-    iteration = int(m.group(1))
+    """Return (iteration, loss, time) for a matching line, else None.
+
+    Handles the warmup line
+      "Iteration 5: Hit counter: 5/50 | Loss: 3.2779 | Time: 29.61s"
+    and the post-warmup speed line
+      "51 : iter_speed 28.90 seconds per iteration | Loss: 3.1021 | ...".
+    Time is the wall-clock seconds ("Time:") for warmup lines, else the
+    seconds-per-iteration from the speed line.
+    """
+    m = _ITER_WARMUP_RE.search(line)
+    if m:
+        iteration = int(m.group(1))
+    else:
+        m = _ITER_SPEED_RE.search(line)
+        if not m:
+            return None
+        iteration = int(m.group(1))
     lm = _LOSS_RE.search(line)
-    tm = _TIME_RE.search(line)
     loss = float(lm.group(1)) if lm else float("nan")
-    time = float(tm.group(1)) if tm else float("nan")
+    tm = _TIME_RE.search(line)
+    if tm:
+        time = float(tm.group(1))
+    else:
+        sm = _SPEED_RE.search(line)
+        time = float(sm.group(1)) if sm else float("nan")
     return iteration, loss, time
 
 
