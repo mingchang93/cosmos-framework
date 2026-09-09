@@ -216,8 +216,8 @@ class IterSpeed(EveryN):
         or this is a window with no recorded steps.
         """
         n = len(values)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        local = torch.tensor(values, dtype=torch.float64, device=device)
+        device = ("cuda" if torch.cuda.is_available() else "npu" if torch.npu.is_available() else "cpu")
+        local = torch.tensor(values, dtype=torch.float32, device=device)
 
         if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
             if n == 0:
@@ -298,7 +298,7 @@ class IterSpeed(EveryN):
         self._local_tokens_since_log = 0
         if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
             return tokens
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = ("cuda" if torch.cuda.is_available() else "npu" if torch.npu.is_available() else "cpu")
         total = torch.tensor([tokens], dtype=torch.int64, device=device)
         torch.distributed.all_reduce(total, op=torch.distributed.ReduceOp.SUM)
         return int(total.item())
