@@ -18,6 +18,8 @@
 #   EXTRA_DATASET_CHECK  bash snippet (string) eval'd after the default checks.
 #   TAIL_OVERRIDES       bash array of Hydra CLI overrides appended after `--`
 #                        (e.g. data_setting.max_tokens=16000 for VLM smokes).
+#   EXTRA_TRAIN_ARGS     word-split train.py flags appended BEFORE `--`
+#                        (e.g. "--deterministic"); set by _sft_device_env.sh.
 #   MASTER_PORT          torchrun --master_port; default 50012.
 #   NPROC_PER_NODE       torchrun --nproc_per_node; default 8.
 #   NNODES               torchrun --nnodes; multi-node only (unset = single-node).
@@ -95,9 +97,10 @@ TORCHRUN_ARGS=(--nproc_per_node="${NPROC_PER_NODE:-8}" --master_port="${MASTER_P
 [[ -n "${NODE_RANK:-}" ]]   && TORCHRUN_ARGS+=(--node_rank="$NODE_RANK")
 [[ -n "${MASTER_ADDR:-}" ]] && TORCHRUN_ARGS+=(--master_addr="$MASTER_ADDR")
 
-IMAGINAIRE_OUTPUT_ROOT="$IMAGINAIRE_OUTPUT_ROOT" PYTHONPATH=. \
+IMAGINAIRE_OUTPUT_ROOT="$IMAGINAIRE_OUTPUT_ROOT" PYTHONPATH="${PYTHONPATH:-.}" \
     torchrun "${TORCHRUN_ARGS[@]}" -m cosmos_framework.scripts.train \
     --sft-toml="$TOML_FILE" \
+    ${EXTRA_TRAIN_ARGS:-} \
     "${TRAILING_ARGS[@]}" \
     2>&1 | tee "$LOG_FILE"
 
