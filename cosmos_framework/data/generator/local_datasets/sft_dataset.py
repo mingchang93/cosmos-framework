@@ -118,6 +118,7 @@ class SFTDataset(torch.utils.data.IterableDataset):
         conditioning_fps_noise_std: float = 0.0,
         conditioning_config: dict[int, float] | None = None,
         temporal_compression_factor: int = 4,
+        shuffle: bool = True,
     ):
         assert temporal_interval_mode in ("force_one", "max_30fps", "entire_chunk"), (
             f"Unknown temporal_interval_mode={temporal_interval_mode!r}"
@@ -144,6 +145,7 @@ class SFTDataset(torch.utils.data.IterableDataset):
         self.conditioning_fps_noise_std = conditioning_fps_noise_std
 
         self.temporal_compression_factor = temporal_compression_factor
+        self.shuffle = shuffle
         self.conditioning_config: dict[int, float] | None = None
         if conditioning_config is not None:
             total_prob = sum(conditioning_config.values())
@@ -420,21 +422,11 @@ class SFTDataset(torch.utils.data.IterableDataset):
         # Deterministic shuffle based on the sha256 hash of uuid
         # Note that the repeated samples are grouped together.
         # Split list to keep only the data for this rank
-        if True:  # This gives more diversity
+        if self.shuffle:  # seeded shuffle for sample diversity across ranks
             random.Random(self.shard_id).shuffle(self.metadata)
             log.info(f"Shuffled metadata for shard {self.shard_id}", rank0_only=False)
-            self.metadata = self.metadata[data_rank::total_data_ranks]
-        else:
-            # Keep the repeated samples together to aid cache hits.
-            self.metadata.sort(key=lambda x: hashlib.sha256(x["vision_path"].encode("utf-8")).hexdigest())
-            # Equally chunk the list (guaranteed to be divisible by total_data_ranks)
-            chunk_size = len(self.metadata) // total_data_ranks
-            start = data_rank * chunk_size
-            end = (data_rank + 1) * chunk_size
-            log.info(
-                f"DRank {data_rank} has got a chunk {start}-{end} from {len(self.metadata)} data.", rank0_only=False
-            )
-            self.metadata = self.metadata[start:end]
+        # Stride-shard the (possibly shuffled) metadata to this rank.
+        self.metadata = self.metadata[data_rank::total_data_ranks]
         num_unique_vision_paths = len(set(metadata["vision_path"] for metadata in self.metadata))
         log.info(
             f"DRank {data_rank} has {len(self.metadata)} data with {num_unique_vision_paths} unique vision_paths.",
@@ -446,7 +438,8 @@ class SFTDataset(torch.utils.data.IterableDataset):
         # Make sure the data within a DRank is identical
         rng = random.Random(data_rank + self.shard_id * 12345)
         while True:
-            rng.shuffle(self.metadata)
+            if self.shuffle:
+                rng.shuffle(self.metadata)
             for metadata in self.metadata:
                 sample = self.process_one_sample(metadata)
                 if sample is None:
@@ -594,6 +587,7 @@ def get_sft_dataset(
     conditioning_fps_noise_std: float = 0.0,
     conditioning_config: dict[int, float] | None = None,
     temporal_compression_factor: int = 4,
+    shuffle: bool = True,
     **kwargs,
 ) -> SFTDataset:
     """Create SFT video dataset from one or more JSONL files on S3.
@@ -687,8 +681,9 @@ def get_sft_dataset(
         metadata_list = _flatten_metadata_by_window(metadata_list)
         log.info(f"sample_by_window=True: flattened to {len(metadata_list)} samples (one per window)")
 
-    # Deterministic shuffle based on the sha256 hash of uuid
-    metadata_list.sort(key=lambda x: hashlib.sha256(x["uuid"].encode("utf-8")).hexdigest())
+    if shuffle:
+        # Deterministic shuffle based on the sha256 hash of uuid
+        metadata_list.sort(key=lambda x: hashlib.sha256(x["uuid"].encode("utf-8")).hexdigest())
 
     dataset = SFTDataset(
         metadata=metadata_list,
@@ -709,5 +704,6 @@ def get_sft_dataset(
         conditioning_fps_noise_std=conditioning_fps_noise_std,
         conditioning_config=conditioning_config,
         temporal_compression_factor=temporal_compression_factor,
+        shuffle=shuffle,
     )
     return dataset

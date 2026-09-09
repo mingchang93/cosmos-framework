@@ -22,6 +22,7 @@
 #
 # Optional env vars:
 #   MAX_ITER                    trainer.max_iter override (default: TOML's 500)
+#   SHUFFLE                     dataset shuffle (default: True; set False to disable)
 #   ASCEND_RT_VISIBLE_DEVICES   NPU device list (default: 0,1,2,3,4,5,6,7)
 #   NPROC_PER_NODE              default: 8 (NPU count)
 #
@@ -52,6 +53,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/_sft_device_env.sh"
 TAIL_OVERRIDES=("model.config.device_type=$DEVICE")
 if [[ -n "${MAX_ITER:-}" ]]; then
     TAIL_OVERRIDES+=("trainer.max_iter=$MAX_ITER")
+fi
+if [[ -n "${SHUFFLE:-}" ]]; then
+    TAIL_OVERRIDES+=("dataloader_train.dataloader.datasets.video.dataset.shuffle=$SHUFFLE")
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"

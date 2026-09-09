@@ -20,6 +20,7 @@
 #
 # Optional env vars:
 #   MAX_ITER              trainer.max_iter override (default: TOML's 500)
+#   SHUFFLE               dataset shuffle (default: True; set False to disable)
 #
 # Usage (8-GPU allocation, inside the training container, from the repo root):
 #   export DATASET_PATH=... BASE_CHECKPOINT_PATH=... WAN_VAE_PATH=... OUTPUT_ROOT=...
@@ -42,6 +43,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/_sft_device_env.sh"
 TAIL_OVERRIDES=("model.config.device_type=$DEVICE")
 if [[ -n "${MAX_ITER:-}" ]]; then
     TAIL_OVERRIDES+=("trainer.max_iter=$MAX_ITER")
+fi
+if [[ -n "${SHUFFLE:-}" ]]; then
+    TAIL_OVERRIDES+=("dataloader_train.dataloader.datasets.video.dataset.shuffle=$SHUFFLE")
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"
