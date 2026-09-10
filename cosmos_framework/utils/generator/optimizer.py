@@ -3,6 +3,7 @@
 
 import collections
 import copy
+import os
 import re
 from typing import Any, Iterator, NamedTuple
 
@@ -425,8 +426,19 @@ class OptimizersContainer(Stateful):
         # (aux) optimizers, which accept it as a named arg. Normalize to a tuple of str.
         orthogonalize_skip_patterns = tuple(optimizer_kwargs.pop("orthogonalize_skip_patterns", None) or ())
 
-        if not optimizer_kwargs.get("fused", False):
-            raise ValueError("Optimizers with fused=False are not supported; pass fused=True in optimizer_kwargs.")
+        force_unfused = os.environ.get("COSMOS_FORCE_UNFUSED_OPTIMIZER", "0") == "1"
+        if force_unfused:
+            # ponytail: cross-platform A/B only — force the non-fused AdamW path so both
+            # platforms run torch's identical elementwise kernel instead of the fused CUDA
+            # kernel (CUDA-only, and numerically different from whatever torch_npu does
+            # with fused=True on NPU).
+            optimizer_kwargs["fused"] = False
+            log.warning("COSMOS_FORCE_UNFUSED_OPTIMIZER=1: forcing non-fused AdamW (fused=False)")
+        elif not optimizer_kwargs.get("fused", False):
+            raise ValueError(
+                "Optimizers with fused=False are not supported; pass fused=True in optimizer_kwargs "
+                "(or set COSMOS_FORCE_UNFUSED_OPTIMIZER=1 to run the non-fused A/B path)."
+            )
         if "lr" not in optimizer_kwargs:
             raise ValueError("`lr` is required in optimizer_kwargs (used as the base for per-group LR multipliers).")
 
