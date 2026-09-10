@@ -5971,11 +5971,16 @@ class OmniMoTModel(ImaginaireModel):
             # precompute latents offline if this graduates from a debug knob.
             tokenizer = self.tokenizer_vision_gen
             orig_device = state.device
-            tokenizer.to("cpu")
+            # Wan2pt2VAEInterface has no .to(); the real module is tokenizer.model.model
+            # (a WanVAE_ nn.Module) plus tokenizer.model.scale (mean/std tensors).
+            wanvae = tokenizer.model
+            wanvae.model.to("cpu")
+            wanvae.scale = tuple(s.to("cpu") for s in wanvae.scale)
             try:
                 return tokenizer.encode(state.to("cpu")).to(orig_device)
             finally:
-                tokenizer.to(orig_device)
+                wanvae.model.to(orig_device)
+                wanvae.scale = tuple(s.to(orig_device) for s in wanvae.scale)
         return self.tokenizer_vision_gen.encode(state)
 
     @torch.no_grad()
