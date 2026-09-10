@@ -24,6 +24,8 @@
 #   MAX_ITER                    trainer.max_iter override (default: TOML's 500)
 #   SHUFFLE                     dataset shuffle (default: True; set False to disable)
 #   SAVE_ITER                   checkpoint save cadence (default: TOML's 100)
+#   PRECISION                   model.config.precision override (default: TOML's
+#                               bfloat16; set float32 for full-fp32 training)
 #   ASCEND_RT_VISIBLE_DEVICES   NPU device list (default: 0,1,2,3,4,5,6,7)
 #   NPROC_PER_NODE              default: 8 (NPU count)
 #
@@ -60,6 +62,9 @@ if [[ -n "${SHUFFLE:-}" ]]; then
 fi
 if [[ -n "${SAVE_ITER:-}" ]]; then
     TAIL_OVERRIDES+=("checkpoint.save_iter=$SAVE_ITER")
+fi
+if [[ -n "${PRECISION:-}" ]]; then
+    TAIL_OVERRIDES+=("model.config.precision=$PRECISION")
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"
