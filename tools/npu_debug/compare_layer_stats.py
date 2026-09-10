@@ -29,8 +29,8 @@ _LINE = re.compile(
 _BOUNDARIES = ["in_gen", "ln1_gen", "attn_gen", "attn_res_gen", "ln2_gen", "mlp_gen", "out_gen"]
 
 
-def _parse(path: str, rank: int | None, iteration: int | None = None) -> dict[tuple[int, str], tuple[float, float]]:
-    stats: dict[tuple[int, str], tuple[float, float]] = {}
+def _parse(path: str, rank: int | None, iteration: int | None = None) -> dict[tuple[int, str], tuple[float, float, float, float]]:
+    stats: dict[tuple[int, str], tuple[float, float, float, float]] = {}
     seen_ranks: set[int] = set()
     for line in open(path):
         m = _LINE.search(line)
@@ -47,10 +47,27 @@ def _parse(path: str, rank: int | None, iteration: int | None = None) -> dict[tu
         key = (layer, m.group(4))
         if key in stats:
             print(f"[warn] duplicate {key} for rank {r} in {path} (gradient-checkpointing recompute?)")
-        stats[key] = (float(m.group(5)), float(m.group(6)))  # (mean, std)
+        stats[key] = (float(m.group(5)), float(m.group(6)), float(m.group(7)), float(m.group(8)))  # (mean, std, min, max)
     if rank is None and len(seen_ranks) > 1:
         print(f"[warn] {path} contains {len(seen_ranks)} ranks {sorted(seen_ranks)}; pass --rank to filter")
     return stats
+
+
+def _rel_diff(
+    mean_n: float, std_n: float, mn_n: float, mx_n: float,
+    mean_g: float, std_g: float, mn_g: float, mx_g: float,
+    metric: str,
+) -> float:
+    """Relative difference between two (mean, std, min, max) summaries.
+
+    ``shift`` is first-order sensitive to per-element differences (a per-element
+    perturbation moves mean/max/min linearly); ``std`` is second-order (a
+    per-element perturbation moves the variance quadratically, hiding small diffs).
+    """
+    denom = max(abs(std_g), 1e-6)
+    if metric == "shift":
+        return max(abs(mean_n - mean_g), abs(mx_n - mx_g), abs(mn_n - mn_g)) / denom
+    return abs(std_n - std_g) / denom
 
 
 def main() -> None:
@@ -59,7 +76,14 @@ def main() -> None:
     ap.add_argument("gpu_dump")
     ap.add_argument("--rank", type=int, default=None, help="filter to this rank (default: use all lines, warn if multi-rank)")
     ap.add_argument("--iter", type=int, default=None, help="filter to this training iteration (default: all)")
-    ap.add_argument("--threshold", type=float, default=0.01, help="std relative-diff threshold (default 1%%)")
+    ap.add_argument("--threshold", type=float, default=0.01, help="relative-diff threshold (default 1%%)")
+    ap.add_argument(
+        "--metric",
+        choices=["std", "shift"],
+        default="shift",
+        help="std = |Δstd|/std (2nd-order, misses small per-element diffs); "
+        "shift = peak(|Δmean|,|Δmax|,|Δmin|)/std (1st-order, catches per-element divergence)",
+    )
     ap.add_argument("--grad", action="store_true", help="diff backward-grad boundaries (*.grad); scanned loss->input, so FIRST >threshold = the op that injects the error")
     args = ap.parse_args()
 
@@ -81,9 +105,9 @@ def main() -> None:
             if key not in npu or key not in gpu:
                 row.append(f"{b}=?")
                 continue
-            mean_n, std_n = npu[key]
-            mean_g, std_g = gpu[key]
-            rd = abs(std_n - std_g) / max(abs(std_g), 1e-6)
+            mean_n, std_n, mn_n, mx_n = npu[key]
+            mean_g, std_g, mn_g, mx_g = gpu[key]
+            rd = _rel_diff(mean_n, std_n, mn_n, mx_n, mean_g, std_g, mn_g, mx_g, args.metric)
             if first is None and rd > args.threshold:
                 first = (layer, b, mean_n, std_n, mean_g, std_g, rd)
             row.append(f"{b}={rd:.3%}")
@@ -94,12 +118,12 @@ def main() -> None:
         if key not in npu or key not in gpu:
             print(f"{b}=?")
             continue
-        mean_n, std_n = npu[key]
-        mean_g, std_g = gpu[key]
-        rd = abs(std_n - std_g) / max(abs(std_g), 1e-6)
+        mean_n, std_n, mn_n, mx_n = npu[key]
+        mean_g, std_g, mn_g, mx_g = gpu[key]
+        rd = _rel_diff(mean_n, std_n, mn_n, mx_n, mean_g, std_g, mn_g, mx_g, args.metric)
         if first is None and rd > args.threshold:
             first = (-1, b, mean_n, std_n, mean_g, std_g, rd)
-        print(f"{b}: std_rel={rd:.3%}  (npu std={std_n:.6f}  gpu std={std_g:.6f})")
+        print(f"{b}: {args.metric}={rd:.3%}  (npu std={std_n:.6f}  gpu std={std_g:.6f})")
 
     if first is None:
         print(f"\nno boundary exceeded {args.threshold:.1%}")
@@ -107,8 +131,8 @@ def main() -> None:
     layer, b, mn, sn, mg, sg, rd = first
     label = f"{b}" if layer < 0 else f"L{layer}.{b}"
     print(
-        f"\nFIRST boundary > {args.threshold:.1%}: {label}\n"
-        f"  std : npu={sn:.6f}  gpu={sg:.6f}  rel={rd:.3%}\n"
+        f"\nFIRST boundary > {args.threshold:.1%} ({args.metric}): {label}\n"
+        f"  rel = {rd:.3%}\n"
         f"  mean: npu={mn:.6f}  gpu={mg:.6f}"
     )
 
