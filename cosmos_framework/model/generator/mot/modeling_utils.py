@@ -60,6 +60,10 @@ def _debug_layer_stats_grad(tag: str, t: torch.Tensor) -> None:
     """
     if not _DEBUG_LAYER_STATS:
         return
+    if not t.requires_grad:
+        # Non-leaf data tensors (e.g. patchified conditioning latents) never
+        # receive a gradient; register_hook would raise. Skip them.
+        return
 
     def _hook(g: torch.Tensor) -> torch.Tensor:
         _debug_layer_stats(f"{tag}.grad", g)

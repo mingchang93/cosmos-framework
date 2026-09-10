@@ -789,7 +789,6 @@ class Cosmos3VFMNetwork(PreTrainedModel):
             modality.tokens, modality.token_shapes, latent_channel=latent_channel
         )  # [total_patches,patch_latent_dim]
         _debug_layer_stats("vae2llm_in", packed_patches)
-        _debug_layer_stats_grad("vae2llm_in", packed_patches)
         packed_tokens = vae2llm(packed_patches.to(target_dtype))  # [total_patches,hidden_size]
         _debug_layer_stats("vae2llm_out", packed_tokens)
         _debug_layer_stats_grad("vae2llm_out", packed_tokens)
