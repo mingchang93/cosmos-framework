@@ -26,6 +26,7 @@
 #   SAVE_ITER                   checkpoint save cadence (default: TOML's 100)
 #   PRECISION                   model.config.precision override (default: TOML's
 #                               bfloat16; set float32 for full-fp32 training)
+#   GRAD_ACCUM                  trainer.grad_accum_iter override (default: TOML's 2)
 #   ASCEND_RT_VISIBLE_DEVICES   NPU device list (default: 0,1,2,3,4,5,6,7)
 #   NPROC_PER_NODE              default: 8 (NPU count)
 #
@@ -65,6 +66,9 @@ if [[ -n "${SAVE_ITER:-}" ]]; then
 fi
 if [[ -n "${PRECISION:-}" ]]; then
     TAIL_OVERRIDES+=("model.config.precision=$PRECISION")
+fi
+if [[ -n "${GRAD_ACCUM:-}" ]]; then
+    TAIL_OVERRIDES+=("trainer.grad_accum_iter=$GRAD_ACCUM")
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"

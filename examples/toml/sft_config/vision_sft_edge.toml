@@ -65,7 +65,7 @@ warm_up_steps      = [50]
 
 [trainer]
 distributed_parallelism = "fsdp"
-grad_accum_iter         = 1
+grad_accum_iter         = 2
 logging_iter            = 1
 max_iter                = 500
 

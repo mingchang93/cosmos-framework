@@ -24,6 +24,7 @@
 #   SAVE_ITER             checkpoint save cadence (default: TOML's 100)
 #   PRECISION             model.config.precision override (default: TOML's
 #                         bfloat16; set float32 for full-fp32 training)
+#   GRAD_ACCUM            trainer.grad_accum_iter override (default: TOML's 2)
 #
 # Usage (8-GPU allocation, inside the training container, from the repo root):
 #   export DATASET_PATH=... BASE_CHECKPOINT_PATH=... WAN_VAE_PATH=... OUTPUT_ROOT=...
@@ -55,6 +56,9 @@ if [[ -n "${SAVE_ITER:-}" ]]; then
 fi
 if [[ -n "${PRECISION:-}" ]]; then
     TAIL_OVERRIDES+=("model.config.precision=$PRECISION")
+fi
+if [[ -n "${GRAD_ACCUM:-}" ]]; then
+    TAIL_OVERRIDES+=("trainer.grad_accum_iter=$GRAD_ACCUM")
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/_sft_launcher_common.sh"
