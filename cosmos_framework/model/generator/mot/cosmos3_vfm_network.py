@@ -45,7 +45,7 @@ from cosmos_framework.model.generator.mot.flex_attention import (
     build_multiview_block_mask,
     resolve_flex_backend,
 )
-from cosmos_framework.model.generator.mot.modeling_utils import TimestepEmbedder, _debug_layer_stats, has_noisy_tokens
+from cosmos_framework.model.generator.mot.modeling_utils import TimestepEmbedder, _debug_layer_stats, _debug_layer_stats_grad, has_noisy_tokens
 from cosmos_framework.model.generator.utils.memory import MemoryState
 from cosmos_framework.data.generator.sequence_packing import ModalityData, PackedSequence
 from cosmos_framework.data.generator.sequence_packing.natten import verify_natten_parameter_list
@@ -789,8 +789,10 @@ class Cosmos3VFMNetwork(PreTrainedModel):
             modality.tokens, modality.token_shapes, latent_channel=latent_channel
         )  # [total_patches,patch_latent_dim]
         _debug_layer_stats("vae2llm_in", packed_patches)
+        _debug_layer_stats_grad("vae2llm_in", packed_patches)
         packed_tokens = vae2llm(packed_patches.to(target_dtype))  # [total_patches,hidden_size]
         _debug_layer_stats("vae2llm_out", packed_tokens)
+        _debug_layer_stats_grad("vae2llm_out", packed_tokens)
         if modality_embed is not None:
             packed_tokens = packed_tokens + modality_embed.view(1, -1)  # [total_patches,hidden_size]
 
@@ -904,6 +906,7 @@ class Cosmos3VFMNetwork(PreTrainedModel):
         noisy_patches = last_hidden_state[modality.mse_loss_indexes]  # [total_noisy_patches,hidden_size]
         preds = llm2vae(noisy_patches)  # [total_noisy_patches,patch_latent_dim]
         _debug_layer_stats("llm2vae_out", preds)
+        _debug_layer_stats_grad("llm2vae_out", preds)
         return self.unpatchify_and_unpack_latents(
             preds,
             token_shapes_vision=modality.token_shapes,

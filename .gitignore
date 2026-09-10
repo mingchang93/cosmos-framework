@@ -21,6 +21,9 @@ cosmos_training_meta/
 *.swp
 .DS_Store
 
+# Local investigation scratch (not for tracking).
+/docs/npu-cuda-loss-gap.md
+
 # ------------------------ BELOW IS AUTO-GENERATED FOR PYTHON REPOS ------------------------
 
 # Byte-compiled / optimized / DLL files

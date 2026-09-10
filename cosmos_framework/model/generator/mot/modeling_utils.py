@@ -50,6 +50,24 @@ def _debug_layer_stats(tag: str, t: torch.Tensor) -> None:
     )
 
 
+def _debug_layer_stats_grad(tag: str, t: torch.Tensor) -> None:
+    """Register a backward hook printing gradient stats for ``tag``.
+
+    ponytail: mirror of ``_debug_layer_stats`` on the gradient flowing through
+    ``t``, to localize the first divergent backward op (tags fire in reverse
+    order). Remove alongside the forward probe once the loss-gap root cause is
+    localized.
+    """
+    if not _DEBUG_LAYER_STATS:
+        return
+
+    def _hook(g: torch.Tensor) -> torch.Tensor:
+        _debug_layer_stats(f"{tag}.grad", g)
+        return g
+
+    t.register_hook(_hook)
+
+
 # --------------------------------------------------------
 # TimestepEmbedder
 # Reference:

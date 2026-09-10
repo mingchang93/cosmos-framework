@@ -23,7 +23,7 @@ import argparse
 import re
 
 _LINE = re.compile(
-    r"\[layer_stats\] iter=(-?\d+) rank=(-?\d+) (?:L(\d+)\.)?(\w+) mean=(-?[\d.eE+-]+) std=(-?[\d.eE+-]+) min=(-?[\d.eE+-]+) max=(-?[\d.eE+-]+)"
+    r"\[layer_stats\] iter=(-?\d+) rank=(-?\d+) (?:L(\d+)\.)?([\w.]+) mean=(-?[\d.eE+-]+) std=(-?[\d.eE+-]+) min=(-?[\d.eE+-]+) max=(-?[\d.eE+-]+)"
 )
 
 _BOUNDARIES = ["in_gen", "ln1_gen", "attn_gen", "attn_res_gen", "ln2_gen", "mlp_gen", "out_gen"]
@@ -60,6 +60,7 @@ def main() -> None:
     ap.add_argument("--rank", type=int, default=None, help="filter to this rank (default: use all lines, warn if multi-rank)")
     ap.add_argument("--iter", type=int, default=None, help="filter to this training iteration (default: all)")
     ap.add_argument("--threshold", type=float, default=0.01, help="std relative-diff threshold (default 1%%)")
+    ap.add_argument("--grad", action="store_true", help="diff backward-grad boundaries (*.grad); scanned loss->input, so FIRST >threshold = the op that injects the error")
     args = ap.parse_args()
 
     npu = _parse(args.npu_dump, args.rank, args.iter)
@@ -67,10 +68,15 @@ def main() -> None:
     layers = sorted({l for l, _ in set(npu) | set(gpu) if l >= 0})
     globals_ = sorted({b for l, b in set(npu) | set(gpu) if l == -1})
 
+    # Backward grads fire in reverse (loss->input): the first divergent grad is
+    # the op that injects the error, so scan reversed. Forward scans input->output.
+    boundaries = [f"{b}.grad" for b in _BOUNDARIES] if args.grad else _BOUNDARIES
+    ordered_layers = reversed(layers) if args.grad else layers
+
     first = None
-    for layer in layers:
+    for layer in ordered_layers:
         row = []
-        for b in _BOUNDARIES:
+        for b in boundaries:
             key = (layer, b)
             if key not in npu or key not in gpu:
                 row.append(f"{b}=?")

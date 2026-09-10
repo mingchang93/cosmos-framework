@@ -16,7 +16,7 @@ from torch.distributed import ProcessGroup
 from cosmos_framework.model.attention import attention as imaginaire_attention
 from cosmos_framework.model.attention.masks import CausalType
 from cosmos_framework.utils import log
-from cosmos_framework.model.generator.mot.modeling_utils import _debug_layer_stats
+from cosmos_framework.model.generator.mot.modeling_utils import _debug_layer_stats, _debug_layer_stats_grad
 from cosmos_framework.model.generator.mot.attention import (
     AttentionMaskType,
     dispatch_attention,
@@ -1188,12 +1188,14 @@ class MoTDecoderLayer(nn.Module):
         """
         # Pre-Attention layernorm
         _debug_layer_stats(f"L{self.layer_idx}.in_gen", get_gen_seq(input))
+        _debug_layer_stats_grad(f"L{self.layer_idx}.in_gen", get_gen_seq(input))
         pack_norm_out = from_und_gen_splits(
             self.input_layernorm(get_und_seq(input)),  # [N_und,hidden_size]
             self.input_layernorm_moe_gen(get_gen_seq(input)),  # [N_gen,hidden_size]
             input,
         )  # [N_und+N_gen,hidden_size]
         _debug_layer_stats(f"L{self.layer_idx}.ln1_gen", get_gen_seq(pack_norm_out))
+        _debug_layer_stats_grad(f"L{self.layer_idx}.ln1_gen", get_gen_seq(pack_norm_out))
 
         # Self Attention + Residual
         kv_to_store: KVToStore | None = None
@@ -1247,8 +1249,10 @@ class MoTDecoderLayer(nn.Module):
             residual_und = get_und_seq(input) + get_und_seq(pack_attn_out)  # [N_und,hidden_size]
             attn_gen = get_gen_seq(pack_attn_out)  # [N_gen,hidden_size]
             _debug_layer_stats(f"L{self.layer_idx}.attn_gen", attn_gen)
+            _debug_layer_stats_grad(f"L{self.layer_idx}.attn_gen", attn_gen)
             residual_gen = get_gen_seq(input) + attn_gen  # [N_gen,hidden_size]
             _debug_layer_stats(f"L{self.layer_idx}.attn_res_gen", residual_gen)
+            _debug_layer_stats_grad(f"L{self.layer_idx}.attn_res_gen", residual_gen)
 
         # Pre-MLP layernorm and processing
         lbl_metadata_dict: dict[str, LBLMetadata] = dict()
@@ -1288,6 +1292,7 @@ class MoTDecoderLayer(nn.Module):
             ln_out_und = self.post_attention_layernorm(residual_und)  # [N_und,hidden_size]
             ln_out_gen = self.post_attention_layernorm_moe_gen(residual_gen)  # [N_gen,hidden_size]
             _debug_layer_stats(f"L{self.layer_idx}.ln2_gen", ln_out_gen)
+            _debug_layer_stats_grad(f"L{self.layer_idx}.ln2_gen", ln_out_gen)
 
             # MASK MLP PADDING ===============
             # NOTE: This is only need for the MoE auxiliary loss computation and to avoid
@@ -1317,6 +1322,7 @@ class MoTDecoderLayer(nn.Module):
             )
             # mlp_out_gen: [N_gen,hidden_size], zero on the padding rows
             _debug_layer_stats(f"L{self.layer_idx}.mlp_gen", mlp_out_gen)
+            _debug_layer_stats_grad(f"L{self.layer_idx}.mlp_gen", mlp_out_gen)
 
             if lbl_metadata_und is not None:
                 lbl_metadata_dict["und"] = lbl_metadata_und
@@ -1326,6 +1332,7 @@ class MoTDecoderLayer(nn.Module):
             mlp_out_und_seq = residual_und + mlp_out_und  # [N_und,hidden_size]
             mlp_out_gen_seq = residual_gen + mlp_out_gen  # [N_gen,hidden_size]
             _debug_layer_stats(f"L{self.layer_idx}.out_gen", mlp_out_gen_seq)
+            _debug_layer_stats_grad(f"L{self.layer_idx}.out_gen", mlp_out_gen_seq)
 
         return from_und_gen_splits(mlp_out_und_seq, mlp_out_gen_seq, input), lbl_metadata_dict, kv_to_store
 
