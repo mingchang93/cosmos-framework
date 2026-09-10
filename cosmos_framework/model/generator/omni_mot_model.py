@@ -59,7 +59,7 @@ from cosmos_framework.model.generator.mot.inference_text_kv_memory import (
     make_inference_text_kv_cache,
     restore_inference_attention_dispatch,
 )
-from cosmos_framework.model.generator.mot.modeling_utils import has_noisy_tokens
+from cosmos_framework.model.generator.mot.modeling_utils import has_noisy_tokens, set_debug_iteration
 from cosmos_framework.model.generator.mot.parallelize_vfm_network import parallelize_vfm_network
 from cosmos_framework.model.generator.reasoner.qwen3_vl.utils import tokenize_caption
 from cosmos_framework.model.generator.utils.data_and_condition import (
@@ -1184,6 +1184,8 @@ class OmniMoTModel(ImaginaireModel):
                 - Tensor: The computed loss for the training step as a PyTorch Tensor.
 
         """
+        set_debug_iteration(iteration)
+
         input_text_indexes, sequence_plans, gen_data_clean, memory_info, data_resolutions, vae_pixel_shapes = (
             self._get_training_inputs(data_batch, iteration)
         )

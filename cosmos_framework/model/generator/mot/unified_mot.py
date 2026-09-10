@@ -16,6 +16,7 @@ from torch.distributed import ProcessGroup
 from cosmos_framework.model.attention import attention as imaginaire_attention
 from cosmos_framework.model.attention.masks import CausalType
 from cosmos_framework.utils import log
+from cosmos_framework.model.generator.mot.modeling_utils import _debug_layer_stats
 from cosmos_framework.model.generator.mot.attention import (
     AttentionMaskType,
     dispatch_attention,
@@ -1094,28 +1095,6 @@ def _real_token_mask(num_rows: int, num_real_tokens: int, device: torch.device) 
     of padding on a rank.
     """
     return torch.arange(num_rows, device=device) < num_real_tokens
-
-
-# ponytail: temporary per-op isolation hook for the NPU-vs-GPU loss-gap debug.
-# Off by default; set COSMOS3_DEBUG_LAYER_STATS=1 to print per-layer/submodule
-# stats for the gen sequence so NPU and GPU logs can be diffed to find the first
-# divergent op. Remove once the loss-gap root cause is localized.
-_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
-
-
-def _debug_layer_stats(tag: str, t: torch.Tensor) -> None:
-    if not _DEBUG_LAYER_STATS:
-        return
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        rank = torch.distributed.get_rank()
-    else:
-        rank = -1
-    t = t.float()
-    print(
-        f"[layer_stats] rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
-        f"min={t.min().item():.6f} max={t.max().item():.6f}",
-        flush=True,
-    )
 
 
 class MoTDecoderLayer(nn.Module):

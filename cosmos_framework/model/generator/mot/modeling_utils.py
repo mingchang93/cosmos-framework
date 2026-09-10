@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: OpenMDW-1.1
 
 import math
+import os
 
 import torch
 from torch import nn
@@ -17,6 +18,35 @@ def has_noisy_tokens(modality_data: ModalityData | None) -> bool:
         and modality_data.tokens is not None
         and isinstance(modality_data.mse_loss_indexes, torch.Tensor)
         and modality_data.mse_loss_indexes.numel() > 0
+    )
+
+
+# ponytail: temporary per-op isolation hook for the NPU-vs-GPU loss-gap debug.
+# Off by default; set COSMOS3_DEBUG_LAYER_STATS=1 to print per-layer/submodule
+# stats for the gen sequence so NPU and GPU logs can be diffed to find the first
+# divergent op. Remove once the loss-gap root cause is localized.
+_DEBUG_LAYER_STATS = os.environ.get("COSMOS3_DEBUG_LAYER_STATS", "0") == "1"
+_DEBUG_ITER = -1
+
+
+def set_debug_iteration(iteration: int) -> None:
+    """Record the current training iteration for layer-stats tagging."""
+    global _DEBUG_ITER
+    _DEBUG_ITER = iteration
+
+
+def _debug_layer_stats(tag: str, t: torch.Tensor) -> None:
+    if not _DEBUG_LAYER_STATS:
+        return
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = -1
+    t = t.float()
+    print(
+        f"[layer_stats] iter={_DEBUG_ITER} rank={rank} {tag} mean={t.mean().item():.6f} std={t.std().item():.6f} "
+        f"min={t.min().item():.6f} max={t.max().item():.6f}",
+        flush=True,
     )
 
 

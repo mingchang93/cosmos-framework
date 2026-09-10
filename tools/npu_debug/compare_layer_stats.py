@@ -23,27 +23,31 @@ import argparse
 import re
 
 _LINE = re.compile(
-    r"\[layer_stats\](?: rank=(-?\d+))? L(\d+)\.(\w+) mean=(-?[\d.eE+-]+) std=(-?[\d.eE+-]+) min=(-?[\d.eE+-]+) max=(-?[\d.eE+-]+)"
+    r"\[layer_stats\] iter=(-?\d+) rank=(-?\d+) (?:L(\d+)\.)?(\w+) mean=(-?[\d.eE+-]+) std=(-?[\d.eE+-]+) min=(-?[\d.eE+-]+) max=(-?[\d.eE+-]+)"
 )
 
 _BOUNDARIES = ["in_gen", "ln1_gen", "attn_gen", "attn_res_gen", "ln2_gen", "mlp_gen", "out_gen"]
 
 
-def _parse(path: str, rank: int | None) -> dict[tuple[int, str], tuple[float, float]]:
+def _parse(path: str, rank: int | None, iteration: int | None = None) -> dict[tuple[int, str], tuple[float, float]]:
     stats: dict[tuple[int, str], tuple[float, float]] = {}
     seen_ranks: set[int] = set()
     for line in open(path):
         m = _LINE.search(line)
         if not m:
             continue
-        r = int(m.group(1)) if m.group(1) is not None else -1
+        it = int(m.group(1))
+        if iteration is not None and it != iteration:
+            continue
+        r = int(m.group(2))
         seen_ranks.add(r)
         if rank is not None and r != rank:
             continue
-        key = (int(m.group(2)), m.group(3))
+        layer = int(m.group(3)) if m.group(3) is not None else -1  # -1 = global boundary (no L-layer prefix)
+        key = (layer, m.group(4))
         if key in stats:
             print(f"[warn] duplicate {key} for rank {r} in {path} (gradient-checkpointing recompute?)")
-        stats[key] = (float(m.group(4)), float(m.group(5)))  # (mean, std)
+        stats[key] = (float(m.group(5)), float(m.group(6)))  # (mean, std)
     if rank is None and len(seen_ranks) > 1:
         print(f"[warn] {path} contains {len(seen_ranks)} ranks {sorted(seen_ranks)}; pass --rank to filter")
     return stats
@@ -54,12 +58,14 @@ def main() -> None:
     ap.add_argument("npu_dump")
     ap.add_argument("gpu_dump")
     ap.add_argument("--rank", type=int, default=None, help="filter to this rank (default: use all lines, warn if multi-rank)")
+    ap.add_argument("--iter", type=int, default=None, help="filter to this training iteration (default: all)")
     ap.add_argument("--threshold", type=float, default=0.01, help="std relative-diff threshold (default 1%%)")
     args = ap.parse_args()
 
-    npu = _parse(args.npu_dump, args.rank)
-    gpu = _parse(args.gpu_dump, args.rank)
-    layers = sorted({l for l, _ in set(npu) | set(gpu)})
+    npu = _parse(args.npu_dump, args.rank, args.iter)
+    gpu = _parse(args.gpu_dump, args.rank, args.iter)
+    layers = sorted({l for l, _ in set(npu) | set(gpu) if l >= 0})
+    globals_ = sorted({b for l, b in set(npu) | set(gpu) if l == -1})
 
     first = None
     for layer in layers:
@@ -77,12 +83,25 @@ def main() -> None:
             row.append(f"{b}={rd:.3%}")
         print(f"L{layer:2d}: " + "  ".join(row))
 
+    for b in globals_:
+        key = (-1, b)
+        if key not in npu or key not in gpu:
+            print(f"{b}=?")
+            continue
+        mean_n, std_n = npu[key]
+        mean_g, std_g = gpu[key]
+        rd = abs(std_n - std_g) / max(abs(std_g), 1e-6)
+        if first is None and rd > args.threshold:
+            first = (-1, b, mean_n, std_n, mean_g, std_g, rd)
+        print(f"{b}: std_rel={rd:.3%}  (npu std={std_n:.6f}  gpu std={std_g:.6f})")
+
     if first is None:
         print(f"\nno boundary exceeded {args.threshold:.1%}")
         return
     layer, b, mn, sn, mg, sg, rd = first
+    label = f"{b}" if layer < 0 else f"L{layer}.{b}"
     print(
-        f"\nFIRST boundary > {args.threshold:.1%}: L{layer}.{b}\n"
+        f"\nFIRST boundary > {args.threshold:.1%}: {label}\n"
         f"  std : npu={sn:.6f}  gpu={sg:.6f}  rel={rd:.3%}\n"
         f"  mean: npu={mn:.6f}  gpu={mg:.6f}"
     )
