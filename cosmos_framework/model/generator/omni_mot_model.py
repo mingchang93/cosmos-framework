@@ -60,6 +60,12 @@ from cosmos_framework.model.generator.mot.inference_text_kv_memory import (
     restore_inference_attention_dispatch,
 )
 from cosmos_framework.model.generator.mot.modeling_utils import has_noisy_tokens, set_debug_iteration
+
+# ponytail: debug knob — force the frozen VAE to encode on CPU so x0 latents are
+# bit-identical across NPU/CUDA, isolating the on-device VAE as the loss-gap seed.
+# Slow (moves the VAE to CPU each call); cache a CPU copy or precompute latents
+# offline if this graduates from a debug knob.
+_FORCE_CPU_VAE = os.environ.get("COSMOS_FORCE_CPU_VAE", "0") == "1"
 from cosmos_framework.model.generator.mot.parallelize_vfm_network import parallelize_vfm_network
 from cosmos_framework.model.generator.reasoner.qwen3_vl.utils import tokenize_caption
 from cosmos_framework.model.generator.utils.data_and_condition import (
@@ -5958,6 +5964,18 @@ class OmniMoTModel(ImaginaireModel):
 
     @torch.no_grad()
     def encode(self, state: torch.Tensor) -> torch.Tensor:
+        if _FORCE_CPU_VAE:
+            # ponytail: debug knob — encode the frozen VAE on CPU so x0 latents are
+            # bit-identical across NPU/CUDA, isolating the on-device VAE as the
+            # loss-gap seed. Moves the VAE per call (slow); cache a CPU copy or
+            # precompute latents offline if this graduates from a debug knob.
+            tokenizer = self.tokenizer_vision_gen
+            orig_device = state.device
+            tokenizer.to("cpu")
+            try:
+                return tokenizer.encode(state.to("cpu")).to(orig_device)
+            finally:
+                tokenizer.to(orig_device)
         return self.tokenizer_vision_gen.encode(state)
 
     @torch.no_grad()
